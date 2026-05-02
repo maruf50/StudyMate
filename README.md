@@ -38,6 +38,10 @@ npm run dev
 - API: http://localhost:4000
 - Web: http://localhost:5173
 
+## Contributing
+
+If you are cloning this repository to work on it, follow the step-by-step guide in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Implemented API Endpoints
 
 ### Auth
