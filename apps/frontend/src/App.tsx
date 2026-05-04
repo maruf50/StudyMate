@@ -8,10 +8,12 @@ import type { User } from "./api";
 import { MainNav } from "./components/MainNav";
 import { DashboardView } from "./components/views/DashboardView";
 import { NotesView } from "./components/views/NotesView";
+import { ChatView } from "./components/views/ChatView";
 import { NAV_ITEMS, STUDY_HOURS_GOAL, XP_GOAL } from "./constants";
 import type { View } from "./types";
 import { buildInterestChart, uniqueInterestTopics } from "./utils";
 import type { NoteSummary } from "./types";
+import type { Message } from "./types";
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -20,6 +22,20 @@ function App() {
     { id: "1", title: "Study group ideas" },
     { id: "2", title: "Exam prep checklist" }
   ]);
+  const [globalMessages, setGlobalMessages] = useState<Message[]>([
+    {
+      id: "m1",
+      username: "StudyBot",
+      content: "Welcome to global chat.",
+      groupId: null,
+      createdAt: new Date().toISOString()
+    }
+  ]);
+  const [groupMessages, setGroupMessages] = useState<Message[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState("g1");
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [chatInput, setChatInput] = useState("");
+  const [groupChatInput, setGroupChatInput] = useState("");
 
   const [interestInput, setInterestInput] = useState("math");
   const [universityInput, setUniversityInput] = useState("");
@@ -97,6 +113,46 @@ function App() {
     ]);
   }
 
+  function onSendGlobalChat() {
+    if (!chatInput.trim()) {
+      return;
+    }
+
+    setGlobalMessages((current) => [
+      ...current,
+      {
+        id: String(Date.now()),
+        username: user?.username || "Student",
+        content: chatInput.trim(),
+        groupId: null,
+        createdAt: new Date().toISOString()
+      }
+    ]);
+    setChatInput("");
+  }
+
+  function onSendGroupChat() {
+    if (!groupChatInput.trim() || !selectedGroupId) {
+      return;
+    }
+
+    if (!activeSessionId) {
+      setActiveSessionId(`s${Date.now()}`);
+    }
+
+    setGroupMessages((current) => [
+      ...current,
+      {
+        id: String(Date.now()),
+        username: user?.username || "Student",
+        content: groupChatInput.trim(),
+        groupId: selectedGroupId,
+        createdAt: new Date().toISOString()
+      }
+    ]);
+    setGroupChatInput("");
+  }
+
   return (
     <div className="page">
       <div className="app-shell">
@@ -105,11 +161,13 @@ function App() {
         <section className="workspace">
           <header className="topbar">
             <div>
-              <h2>{activeView === "notes" ? "Notes" : "Dashboard"}</h2>
+              <h2>{activeView === "notes" ? "Notes" : activeView === "chat" ? "Chat" : "Dashboard"}</h2>
               <p>
                 {activeView === "notes"
                   ? "Your saved notes and study reminders"
-                  : `${user?.university || "University"} • ${user?.department || "Department"}`}
+                  : activeView === "chat"
+                    ? "Talk with everyone or your study group"
+                    : `${user?.university || "University"} • ${user?.department || "Department"}`}
               </p>
             </div>
             <div className="topbar-actions">
@@ -117,6 +175,11 @@ function App() {
                 <>
                   <span className="top-chip">{notes.length} notes</span>
                   <span className="top-chip">Click add to create one</span>
+                </>
+              ) : activeView === "chat" ? (
+                <>
+                  <span className="top-chip">{globalMessages.length} global</span>
+                  <span className="top-chip">{groupMessages.length} group</span>
                 </>
               ) : (
                 <>
@@ -129,6 +192,19 @@ function App() {
 
           {activeView === "notes" ? (
             <NotesView notes={notes} onAddNote={onAddNote} />
+          ) : activeView === "chat" ? (
+            <ChatView
+              globalMessages={globalMessages}
+              groupMessages={groupMessages}
+              selectedGroupId={selectedGroupId}
+              activeSessionId={activeSessionId}
+              chatInput={chatInput}
+              groupChatInput={groupChatInput}
+              onChatInputChange={setChatInput}
+              onGroupChatInputChange={setGroupChatInput}
+              onSendGlobalChat={onSendGlobalChat}
+              onSendGroupChat={onSendGroupChat}
+            />
           ) : (
             <>
               <section className="kpi-strip">

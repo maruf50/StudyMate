@@ -58,11 +58,11 @@ export function ChatView(props: ChatViewProps) {
 
         {chatTab === "group" && (
           <>
-            <h2>Group Chat {props.selectedGroupId ? (${props.selectedGroupId}) : ""}</h2>
+            <h2>Group Chat {props.selectedGroupId ? `(${props.selectedGroupId})` : ""}</h2>
             <p>Select any group from the Groups page and open its chat.</p>
             {props.activeSessionId && props.selectedGroupId && (
               <div className="session-banner">
-                Session Active in Group {props.selectedGroupId} â¢ Session ID: {props.activeSessionId}
+                Session Active in Group {props.selectedGroupId} | Session ID: {props.activeSessionId}
               </div>
             )}
             <div className="chat-list">
