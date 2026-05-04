@@ -4,10 +4,10 @@ This guide explains how collaborators can clone the repository to their desktop,
 
 ## 1. Clone the repository
 
-Open PowerShell and run:
+Go to desktop and right click.
+then click on "Open terminal"
+paste it:
 
-```powershell
-cd $env:USERPROFILE\Desktop
 git clone https://github.com/maruf50/StudyMate.git
 cd StudyMate
 ```
