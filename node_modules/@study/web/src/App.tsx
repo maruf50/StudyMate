@@ -12,6 +12,7 @@ import { DashboardView } from "./components/views/DashboardView";
 import { NotesView } from "./components/views/NotesView";
 import { ChatView } from "./components/views/ChatView";
 import { MatchingView } from "./components/views/MatchingView";
+import { TrackerView } from "./components/views/TrackerView";
 import { NAV_ITEMS, STUDY_HOURS_GOAL, XP_GOAL } from "./constants";
 import type { View } from "./types";
 import { buildInterestChart, filterMatchesByInterest, uniqueInterestTopics } from "./utils";
@@ -47,6 +48,7 @@ function App() {
   const [demoCandidates, setDemoCandidates] = useState<MatchCandidate[]>([]);
   const [isDemoRunning, setIsDemoRunning] = useState(false);
   const [demoStatus, setDemoStatus] = useState("Pick users and create a study session group.");
+  const [trackerSessionId, setTrackerSessionId] = useState("");
 
   const [interestInput, setInterestInput] = useState("math");
   const [universityInput, setUniversityInput] = useState("");
@@ -227,6 +229,15 @@ function App() {
     setDemoStatus("Demo candidates selected. Click Create Study Session Group.");
   }
 
+  function onStartSession() {
+    const sessionId = `session_${Date.now()}`;
+    setTrackerSessionId(sessionId);
+  }
+
+  function onEndSession() {
+    setTrackerSessionId("");
+  }
+
   const headerTitle =
     activeView === "notes"
       ? "Notes"
@@ -234,7 +245,9 @@ function App() {
         ? "Chat"
         : activeView === "matching"
           ? "Matching"
-          : "Dashboard";
+          : activeView === "tracker"
+            ? "Tracker"
+            : "Dashboard";
 
   const headerSubtitle =
     activeView === "notes"
@@ -243,7 +256,9 @@ function App() {
         ? "Talk with everyone or your study group"
         : activeView === "matching"
           ? "Find best-fit teammates and create a study session"
-          : `${user?.university || "University"} • ${user?.department || "Department"}`;
+          : activeView === "tracker"
+            ? "Monitor your study sessions and progress"
+            : `${user?.university || "University"} • ${user?.department || "Department"}`;
 
   return (
     <div className="page">
@@ -266,6 +281,10 @@ function App() {
                 <>
                   <span className="top-chip">{filteredMatches.length} candidates</span>
                   <span className="top-chip">{selectedMatchUserIds.length} selected</span>
+                </>
+              ) : activeView === "tracker" ? (
+                <>
+                  <span className="top-chip">{trackerSessionId ? "Session Active" : "No Session"}</span>
                 </>
               ) : activeView === "chat" ? (
                 <>
@@ -299,6 +318,15 @@ function App() {
               onStartMatchmakingDemo={onStartMatchmakingDemo}
               onCreateDemoGroup={onCreateDemoGroup}
               onCreatePartyGroup={onCreatePartyGroup}
+            />
+          ) : activeView === "tracker" ? (
+            <TrackerView
+              statsText={statsText}
+              xpProgress={xpProgress}
+              hoursProgress={hoursProgress}
+              activeSessionId={trackerSessionId}
+              onStartSession={onStartSession}
+              onEndSession={onEndSession}
             />
           ) : activeView === "chat" ? (
             <ChatView
