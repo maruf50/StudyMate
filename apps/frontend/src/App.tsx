@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import {
+  createGroup,
+  getMatches,
   getMe,
   getStats,
   saveProfile
@@ -9,11 +11,13 @@ import { MainNav } from "./components/MainNav";
 import { DashboardView } from "./components/views/DashboardView";
 import { NotesView } from "./components/views/NotesView";
 import { ChatView } from "./components/views/ChatView";
+import { MatchingView } from "./components/views/MatchingView";
 import { NAV_ITEMS, STUDY_HOURS_GOAL, XP_GOAL } from "./constants";
 import type { View } from "./types";
-import { buildInterestChart, uniqueInterestTopics } from "./utils";
+import { buildInterestChart, filterMatchesByInterest, uniqueInterestTopics } from "./utils";
 import type { NoteSummary } from "./types";
 import type { Message } from "./types";
+import type { MatchCandidate } from "./types";
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -36,6 +40,13 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [groupChatInput, setGroupChatInput] = useState("");
+  const [matchInterest, setMatchInterest] = useState("");
+  const [partyGroupName, setPartyGroupName] = useState("Focus Session");
+  const [selectedMatchUserIds, setSelectedMatchUserIds] = useState<string[]>([]);
+  const [allMatches, setAllMatches] = useState<MatchCandidate[]>([]);
+  const [demoCandidates, setDemoCandidates] = useState<MatchCandidate[]>([]);
+  const [isDemoRunning, setIsDemoRunning] = useState(false);
+  const [demoStatus, setDemoStatus] = useState("Pick users and create a study session group.");
 
   const [interestInput, setInterestInput] = useState("math");
   const [universityInput, setUniversityInput] = useState("");
@@ -46,9 +57,10 @@ function App() {
   }, []);
 
   async function refreshCoreData(): Promise<void> {
-    const [me, statsData] = await Promise.all([
+    const [me, statsData, matchesData] = await Promise.all([
       getMe(),
-      getStats()
+      getStats(),
+      getMatches()
     ]);
 
     setUser((prev) => {
@@ -62,6 +74,13 @@ function App() {
         totalXp: statsData.totalXp ?? base.totalXp
       };
     });
+
+    setAllMatches(
+      matchesData.matches.map((candidate, index) => ({
+        ...candidate,
+        score: Math.max(50, 95 - index * 8)
+      }))
+    );
   }
 
   const statsText = !user
@@ -76,6 +95,10 @@ function App() {
 
   const interestChart = buildInterestChart(user);
   const availableInterests = uniqueInterestTopics(user);
+  const matchingInterests = Array.from(
+    new Set([...availableInterests, ...allMatches.flatMap((candidate) => candidate.interests?.map((entry) => entry.topic) || [])])
+  );
+  const filteredMatches = filterMatchesByInterest(allMatches, matchInterest);
 
   useEffect(() => {
     setUniversityInput(user?.university || "");
@@ -153,6 +176,75 @@ function App() {
     setGroupChatInput("");
   }
 
+  function onToggleMatchUser(userId: string) {
+    setSelectedMatchUserIds((current) =>
+      current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId]
+    );
+  }
+
+  async function onCreatePartyGroup() {
+    if (selectedMatchUserIds.length === 0) {
+      return;
+    }
+
+    const groupName = partyGroupName.trim() || "Focus Session";
+    const response = await createGroup({
+      name: groupName,
+      topic: matchInterest || "general",
+      description: "Created from Matching view",
+      invitedUserIds: selectedMatchUserIds
+    });
+
+    setSelectedGroupId(response.group.id);
+    setActiveView("chat");
+    setDemoStatus(`Created group \"${response.group.name}\" with ${selectedMatchUserIds.length} invite(s).`);
+    setSelectedMatchUserIds([]);
+  }
+
+  function onStartMatchmakingDemo() {
+    setIsDemoRunning(true);
+    setDemoStatus("Searching for the best study partners...");
+
+    window.setTimeout(() => {
+      const candidates = filteredMatches.slice(0, 3);
+      setDemoCandidates(candidates);
+      setDemoStatus(
+        candidates.length > 0
+          ? `Found ${candidates.length} candidate(s). Review and create a group.`
+          : "No candidates found for this interest."
+      );
+      setIsDemoRunning(false);
+    }, 900);
+  }
+
+  function onCreateDemoGroup() {
+    if (demoCandidates.length === 0) {
+      return;
+    }
+
+    setSelectedMatchUserIds(demoCandidates.map((candidate) => candidate.userId));
+    setPartyGroupName(`Match Demo ${new Date().toLocaleTimeString()}`);
+    setDemoStatus("Demo candidates selected. Click Create Study Session Group.");
+  }
+
+  const headerTitle =
+    activeView === "notes"
+      ? "Notes"
+      : activeView === "chat"
+        ? "Chat"
+        : activeView === "matching"
+          ? "Matching"
+          : "Dashboard";
+
+  const headerSubtitle =
+    activeView === "notes"
+      ? "Your saved notes and study reminders"
+      : activeView === "chat"
+        ? "Talk with everyone or your study group"
+        : activeView === "matching"
+          ? "Find best-fit teammates and create a study session"
+          : `${user?.university || "University"} • ${user?.department || "Department"}`;
+
   return (
     <div className="page">
       <div className="app-shell">
@@ -161,20 +253,19 @@ function App() {
         <section className="workspace">
           <header className="topbar">
             <div>
-              <h2>{activeView === "notes" ? "Notes" : activeView === "chat" ? "Chat" : "Dashboard"}</h2>
-              <p>
-                {activeView === "notes"
-                  ? "Your saved notes and study reminders"
-                  : activeView === "chat"
-                    ? "Talk with everyone or your study group"
-                    : `${user?.university || "University"} • ${user?.department || "Department"}`}
-              </p>
+              <h2>{headerTitle}</h2>
+              <p>{headerSubtitle}</p>
             </div>
             <div className="topbar-actions">
               {activeView === "notes" ? (
                 <>
                   <span className="top-chip">{notes.length} notes</span>
                   <span className="top-chip">Click add to create one</span>
+                </>
+              ) : activeView === "matching" ? (
+                <>
+                  <span className="top-chip">{filteredMatches.length} candidates</span>
+                  <span className="top-chip">{selectedMatchUserIds.length} selected</span>
                 </>
               ) : activeView === "chat" ? (
                 <>
@@ -192,6 +283,23 @@ function App() {
 
           {activeView === "notes" ? (
             <NotesView notes={notes} onAddNote={onAddNote} />
+          ) : activeView === "matching" ? (
+            <MatchingView
+              matchInterest={matchInterest}
+              availableInterests={matchingInterests}
+              partyGroupName={partyGroupName}
+              selectedMatchUserIds={selectedMatchUserIds}
+              filteredMatches={filteredMatches}
+              demoCandidates={demoCandidates}
+              isDemoRunning={isDemoRunning}
+              demoStatus={demoStatus}
+              onMatchInterestChange={setMatchInterest}
+              onPartyGroupNameChange={setPartyGroupName}
+              onToggleMatchUser={onToggleMatchUser}
+              onStartMatchmakingDemo={onStartMatchmakingDemo}
+              onCreateDemoGroup={onCreateDemoGroup}
+              onCreatePartyGroup={onCreatePartyGroup}
+            />
           ) : activeView === "chat" ? (
             <ChatView
               globalMessages={globalMessages}

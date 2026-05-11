@@ -1,4 +1,4 @@
-export type View = "dashboard" | "notes" | "chat";
+export type View = "dashboard" | "matching" | "notes" | "chat";
 
 export type Message = {
   id: string;
