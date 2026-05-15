@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import {
   createGroup,
+  getGroups,
   getMatches,
   getMe,
   getStats,
+  joinGroup,
   saveProfile
 } from "./api";
 import type { User } from "./api";
 import { MainNav } from "./components/MainNav";
 import { DashboardView } from "./components/views/DashboardView";
+import { GroupsView } from "./components/views/GroupsView";
 import { NotesView } from "./components/views/NotesView";
 import { ChatView } from "./components/views/ChatView";
 import { MatchingView } from "./components/views/MatchingView";
@@ -16,13 +19,86 @@ import { TrackerView } from "./components/views/TrackerView";
 import { NAV_ITEMS, STUDY_HOURS_GOAL, XP_GOAL } from "./constants";
 import type { View } from "./types";
 import { buildInterestChart, filterMatchesByInterest, uniqueInterestTopics } from "./utils";
+import type { GroupSummary } from "./types";
 import type { NoteSummary } from "./types";
 import type { Message } from "./types";
 import type { MatchCandidate } from "./types";
 
+type ApiGroup = {
+  id: string;
+  name: string;
+  topic: string;
+  description: string;
+  memberIds: string[];
+};
+
+const VIEW_PATHS: Record<View, string> = {
+  dashboard: "/dashboard",
+  matching: "/matching",
+  groups: "/groups",
+  notes: "/notes",
+  chat: "/chat",
+  tracker: "/tracker"
+};
+
+const VIEW_META: Record<View, { title: string; subtitle: string }> = {
+  dashboard: { title: "Dashboard", subtitle: "Your study profile, progress, and setup" },
+  matching: { title: "Matching", subtitle: "Find best-fit teammates and create a study session" },
+  groups: { title: "Groups", subtitle: "Create, join, and manage study groups" },
+  notes: { title: "Notes", subtitle: "Your saved notes and study reminders" },
+  chat: { title: "Chat", subtitle: "Talk with everyone or your study group" },
+  tracker: { title: "Tracker", subtitle: "Monitor your study sessions and progress" }
+};
+
+function getViewFromPath(pathname: string): View {
+  const segment = pathname.split("/").filter(Boolean)[0];
+
+  if (
+    segment === "dashboard" ||
+    segment === "matching" ||
+    segment === "groups" ||
+    segment === "notes" ||
+    segment === "chat" ||
+    segment === "tracker"
+  ) {
+    return segment;
+  }
+
+  return "dashboard";
+}
+
+function mapGroupsToSummaries(groups: ApiGroup[], user: User | null, selectedGroupId: string, activeSessionId: string): GroupSummary[] {
+  return groups.map((group) => {
+    const memberCount = group.memberIds.length;
+    const isMember = Boolean(user && group.memberIds.includes(user.id));
+    const hasCapacity = memberCount < 6;
+    const isActive = group.id === selectedGroupId && Boolean(activeSessionId);
+
+    return {
+      id: group.id,
+      name: group.name,
+      memberCount,
+      maxMembers: 6,
+      studyTopic: group.topic,
+      studyDescription: group.description,
+      leaderName: user?.username || "Study Lead",
+      totalStudyMinutes: memberCount * 45,
+      isActive,
+      activeSessionCount: isActive ? 1 : 0,
+      hasCapacity,
+      isMember,
+      canJoin: hasCapacity && !isMember
+    };
+  });
+}
+
 function App() {
+  return <AppShell />;
+}
+
+function AppShell() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeView, setActiveView] = useState<View>("dashboard");
+  const [activeView, setActiveView] = useState<View>(() => getViewFromPath(window.location.pathname));
   const [notes, setNotes] = useState<NoteSummary[]>([
     { id: "1", title: "Study group ideas" },
     { id: "2", title: "Exam prep checklist" }
@@ -37,7 +113,7 @@ function App() {
     }
   ]);
   const [groupMessages, setGroupMessages] = useState<Message[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState("g1");
+  const [selectedGroupId, setSelectedGroupId] = useState("");
   const [activeSessionId, setActiveSessionId] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [groupChatInput, setGroupChatInput] = useState("");
@@ -49,20 +125,43 @@ function App() {
   const [isDemoRunning, setIsDemoRunning] = useState(false);
   const [demoStatus, setDemoStatus] = useState("Pick users and create a study session group.");
   const [trackerSessionId, setTrackerSessionId] = useState("");
+  const [groups, setGroups] = useState<GroupSummary[]>([]);
+  const [groupName, setGroupName] = useState("Study Group");
+  const [groupTopic, setGroupTopic] = useState("math");
+  const [groupDescription, setGroupDescription] = useState("Focused evening study session");
 
   const [interestInput, setInterestInput] = useState("math");
   const [universityInput, setUniversityInput] = useState("");
   const [departmentInput, setDepartmentInput] = useState("");
 
   useEffect(() => {
+    const handlePopState = () => {
+      setActiveView(getViewFromPath(window.location.pathname));
+    };
+
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (window.location.pathname !== VIEW_PATHS[activeView]) {
+      window.history.replaceState({}, "", VIEW_PATHS[activeView]);
+    }
+  }, [activeView]);
+
+  useEffect(() => {
     void refreshCoreData();
   }, []);
 
   async function refreshCoreData(): Promise<void> {
-    const [me, statsData, matchesData] = await Promise.all([
+    const [me, statsData, matchesData, groupsData] = await Promise.all([
       getMe(),
       getStats(),
-      getMatches()
+      getMatches(),
+      getGroups()
     ]);
 
     setUser((prev) => {
@@ -76,6 +175,8 @@ function App() {
         totalXp: statsData.totalXp ?? base.totalXp
       };
     });
+
+    setGroups(mapGroupsToSummaries(groupsData.groups as ApiGroup[], me.user || null, selectedGroupId, activeSessionId));
 
     setAllMatches(
       matchesData.matches.map((candidate, index) => ({
@@ -101,6 +202,8 @@ function App() {
     new Set([...availableInterests, ...allMatches.flatMap((candidate) => candidate.interests?.map((entry) => entry.topic) || [])])
   );
   const filteredMatches = filterMatchesByInterest(allMatches, matchInterest);
+  const selectedGroup = groups.find((group) => group.id === selectedGroupId) || null;
+  const visibleGroupMessages = groupMessages.filter((message) => message.groupId === selectedGroupId);
 
   useEffect(() => {
     setUniversityInput(user?.university || "");
@@ -126,6 +229,11 @@ function App() {
 
   function onLogout() {
     setUser(null);
+  }
+
+  function onNavigate(view: View) {
+    window.history.pushState({}, "", VIEW_PATHS[view]);
+    setActiveView(view);
   }
 
   function onAddNote() {
@@ -184,6 +292,36 @@ function App() {
     );
   }
 
+  async function onCreateGroup() {
+    const name = groupName.trim() || "Study Group";
+    const topic = groupTopic.trim() || "general";
+    const description = groupDescription.trim() || "Focused study session";
+
+    const response = await createGroup({
+      name,
+      topic,
+      description
+    });
+
+    setSelectedGroupId(response.group.id);
+    setGroupName("Study Group");
+    setGroupTopic("math");
+    setGroupDescription("Focused evening study session");
+    await refreshCoreData();
+  }
+
+  async function onJoinGroup(groupId: string) {
+    await joinGroup(groupId);
+    setSelectedGroupId(groupId);
+    await refreshCoreData();
+  }
+
+  function onOpenGroupChat(groupId: string) {
+    setSelectedGroupId(groupId);
+    window.history.pushState({}, "", VIEW_PATHS.chat);
+    setActiveView("chat");
+  }
+
   async function onCreatePartyGroup() {
     if (selectedMatchUserIds.length === 0) {
       return;
@@ -198,6 +336,7 @@ function App() {
     });
 
     setSelectedGroupId(response.group.id);
+    window.history.pushState({}, "", VIEW_PATHS.chat);
     setActiveView("chat");
     setDemoStatus(`Created group \"${response.group.name}\" with ${selectedMatchUserIds.length} invite(s).`);
     setSelectedMatchUserIds([]);
@@ -238,110 +377,45 @@ function App() {
     setTrackerSessionId("");
   }
 
-  const headerTitle =
-    activeView === "notes"
-      ? "Notes"
-      : activeView === "chat"
-        ? "Chat"
-        : activeView === "matching"
-          ? "Matching"
-          : activeView === "tracker"
-            ? "Tracker"
-            : "Dashboard";
-
   const headerSubtitle =
+    activeView === "dashboard"
+      ? `${user?.university || "University"} • ${user?.department || "Department"}`
+      : VIEW_META[activeView].subtitle;
+
+  const topbarChips =
     activeView === "notes"
-      ? "Your saved notes and study reminders"
-      : activeView === "chat"
-        ? "Talk with everyone or your study group"
-        : activeView === "matching"
-          ? "Find best-fit teammates and create a study session"
+      ? [`${notes.length} notes`, "Click add to create one"]
+      : activeView === "matching"
+        ? [`${filteredMatches.length} candidates`, `${selectedMatchUserIds.length} selected`]
+        : activeView === "groups"
+          ? [`${groups.length} groups`, selectedGroupId ? `Active ${selectedGroupId}` : "No active group"]
           : activeView === "tracker"
-            ? "Monitor your study sessions and progress"
-            : `${user?.university || "University"} • ${user?.department || "Department"}`;
+            ? [trackerSessionId ? "Session Active" : "No Session"]
+            : activeView === "chat"
+              ? [`${globalMessages.length} global`, selectedGroup ? selectedGroup.name : "No active group"]
+              : [user?.username || "Student", statsText];
 
   return (
     <div className="page">
       <div className="app-shell">
-        <MainNav navItems={NAV_ITEMS} activeView={activeView} onNavigate={setActiveView} onLogout={onLogout} />
+        <MainNav navItems={NAV_ITEMS} activeView={activeView} onNavigate={onNavigate} onLogout={onLogout} />
 
         <section className="workspace">
           <header className="topbar">
             <div>
-              <h2>{headerTitle}</h2>
+              <h2>{VIEW_META[activeView].title}</h2>
               <p>{headerSubtitle}</p>
             </div>
             <div className="topbar-actions">
-              {activeView === "notes" ? (
-                <>
-                  <span className="top-chip">{notes.length} notes</span>
-                  <span className="top-chip">Click add to create one</span>
-                </>
-              ) : activeView === "matching" ? (
-                <>
-                  <span className="top-chip">{filteredMatches.length} candidates</span>
-                  <span className="top-chip">{selectedMatchUserIds.length} selected</span>
-                </>
-              ) : activeView === "tracker" ? (
-                <>
-                  <span className="top-chip">{trackerSessionId ? "Session Active" : "No Session"}</span>
-                </>
-              ) : activeView === "chat" ? (
-                <>
-                  <span className="top-chip">{globalMessages.length} global</span>
-                  <span className="top-chip">{groupMessages.length} group</span>
-                </>
-              ) : (
-                <>
-                  <span className="top-chip">{user?.username || "Student"}</span>
-                  <span className="top-chip">{statsText}</span>
-                </>
-              )}
+              {topbarChips.map((chip) => (
+                <span key={chip} className="top-chip">
+                  {chip}
+                </span>
+              ))}
             </div>
           </header>
 
-          {activeView === "notes" ? (
-            <NotesView notes={notes} onAddNote={onAddNote} />
-          ) : activeView === "matching" ? (
-            <MatchingView
-              matchInterest={matchInterest}
-              availableInterests={matchingInterests}
-              partyGroupName={partyGroupName}
-              selectedMatchUserIds={selectedMatchUserIds}
-              filteredMatches={filteredMatches}
-              demoCandidates={demoCandidates}
-              isDemoRunning={isDemoRunning}
-              demoStatus={demoStatus}
-              onMatchInterestChange={setMatchInterest}
-              onPartyGroupNameChange={setPartyGroupName}
-              onToggleMatchUser={onToggleMatchUser}
-              onStartMatchmakingDemo={onStartMatchmakingDemo}
-              onCreateDemoGroup={onCreateDemoGroup}
-              onCreatePartyGroup={onCreatePartyGroup}
-            />
-          ) : activeView === "tracker" ? (
-            <TrackerView
-              statsText={statsText}
-              xpProgress={xpProgress}
-              hoursProgress={hoursProgress}
-              activeSessionId={trackerSessionId}
-              onStartSession={onStartSession}
-              onEndSession={onEndSession}
-            />
-          ) : activeView === "chat" ? (
-            <ChatView
-              globalMessages={globalMessages}
-              groupMessages={groupMessages}
-              selectedGroupId={selectedGroupId}
-              activeSessionId={activeSessionId}
-              chatInput={chatInput}
-              groupChatInput={groupChatInput}
-              onChatInputChange={setChatInput}
-              onGroupChatInputChange={setGroupChatInput}
-              onSendGlobalChat={onSendGlobalChat}
-              onSendGroupChat={onSendGroupChat}
-            />
-          ) : (
+          {activeView === "dashboard" ? (
             <>
               <section className="kpi-strip">
                 <article className="kpi-card">
@@ -372,6 +446,63 @@ function App() {
                 onSaveProfile={onSaveProfile}
               />
             </>
+          ) : activeView === "matching" ? (
+            <MatchingView
+              matchInterest={matchInterest}
+              availableInterests={matchingInterests}
+              partyGroupName={partyGroupName}
+              selectedMatchUserIds={selectedMatchUserIds}
+              filteredMatches={filteredMatches}
+              demoCandidates={demoCandidates}
+              isDemoRunning={isDemoRunning}
+              demoStatus={demoStatus}
+              onMatchInterestChange={setMatchInterest}
+              onPartyGroupNameChange={setPartyGroupName}
+              onToggleMatchUser={onToggleMatchUser}
+              onStartMatchmakingDemo={onStartMatchmakingDemo}
+              onCreateDemoGroup={onCreateDemoGroup}
+              onCreatePartyGroup={onCreatePartyGroup}
+            />
+          ) : activeView === "groups" ? (
+            <GroupsView
+              groupName={groupName}
+              groupTopic={groupTopic}
+              groupDescription={groupDescription}
+              groups={groups}
+              onGroupNameChange={setGroupName}
+              onGroupTopicChange={setGroupTopic}
+              onGroupDescriptionChange={setGroupDescription}
+              onCreateGroup={onCreateGroup}
+              onJoinGroup={onJoinGroup}
+              onOpenGroupChat={onOpenGroupChat}
+            />
+          ) : activeView === "notes" ? (
+            <NotesView notes={notes} onAddNote={onAddNote} />
+          ) : activeView === "chat" ? (
+            <ChatView
+              groups={groups}
+              globalMessages={globalMessages}
+              groupMessages={visibleGroupMessages}
+              selectedGroupId={selectedGroupId}
+              selectedGroup={selectedGroup}
+              activeSessionId={activeSessionId}
+              chatInput={chatInput}
+              groupChatInput={groupChatInput}
+              onChatInputChange={setChatInput}
+              onGroupChatInputChange={setGroupChatInput}
+              onSendGlobalChat={onSendGlobalChat}
+              onSendGroupChat={onSendGroupChat}
+              onSelectGroup={setSelectedGroupId}
+            />
+          ) : (
+            <TrackerView
+              statsText={statsText}
+              xpProgress={xpProgress}
+              hoursProgress={hoursProgress}
+              activeSessionId={trackerSessionId}
+              onStartSession={onStartSession}
+              onEndSession={onEndSession}
+            />
           )}
         </section>
       </div>
