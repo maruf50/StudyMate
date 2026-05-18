@@ -1,0 +1,247 @@
+// This is your Prisma schema file.
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ===== USER & PROFILE =====
+
+model User {
+  id                    String    @id @default(cuid())
+  email                 String    @unique
+  username              String    @unique
+  password              String
+  university            String?
+  department            String?
+  totalXp               Int       @default(0)
+  totalStudyMinutes     Int       @default(0)
+  profileImageUrl       String?
+  bio                   String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  interests             UserInterest[]
+  availability          AvailabilitySlot[]
+  groupsMemberships     GroupMember[]
+  groupsCreated         StudyGroup[]      @relation("GroupCreator")
+  studySessions         StudySessionMember[]
+  notes                 Note[]
+  noteAccessRequests    NoteAccessRequest[] @relation("Requester")
+  noteAccesses          NoteAccess[]
+  friendRequestsSent    FriendRequest[]     @relation("FriendRequester")
+  friendRequestsReceived FriendRequest[]    @relation("FriendRecipient")
+  sentMessages          Message[]
+  matchesAs             UserMatch[]       @relation("User1")
+  matchedWith           UserMatch[]       @relation("User2")
+  
+  @@map("users")
+}
+
+model UserInterest {
+  id          String    @id @default(cuid())
+  userId      String
+  topic       String
+  level       String    @default("beginner") // beginner, intermediate, advanced
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, topic])
+  @@map("user_interests")
+}
+
+model AvailabilitySlot {
+  id        String    @id @default(cuid())
+  userId    String
+  day       String    // mon, tue, wed, thu, fri, sat, sun
+  startHour Int
+  endHour   Int
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, day])
+  @@map("availability_slots")
+}
+
+// ===== STUDY GROUPS & SESSIONS =====
+
+model StudyGroup {
+  id            String    @id @default(cuid())
+  name          String
+  topic         String
+  description   String?
+  creatorId     String
+  maxMembers    Int       @default(6)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  creator       User           @relation("GroupCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  members       GroupMember[]
+  studySessions StudySession[]
+  messages      Message[]
+
+  @@map("study_groups")
+}
+
+model GroupMember {
+  id        String    @id @default(cuid())
+  groupId   String
+  userId    String
+  joinedAt  DateTime  @default(now())
+
+  group     StudyGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@map("group_members")
+}
+
+model StudySession {
+  id              String    @id @default(cuid())
+  groupId         String
+  startTime       DateTime
+  endTime         DateTime?
+  durationMinutes Int?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  group           StudyGroup        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  participants    StudySessionMember[]
+
+  @@map("study_sessions")
+}
+
+model StudySessionMember {
+  id              String    @id @default(cuid())
+  sessionId       String
+  userId          String
+  minutesStudied  Int       @default(0)
+  xpEarned        Int       @default(0)
+  joinedAt        DateTime  @default(now())
+
+  session         StudySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userId])
+  @@map("study_session_members")
+}
+
+// ===== NOTES & PRIVACY =====
+
+model Note {
+  id            String    @id @default(cuid())
+  userId        String
+  title         String
+  isPrivate     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content       NoteContent[]
+  accessRequests NoteAccessRequest[]
+  allowedUsers  NoteAccess[]
+
+  @@map("notes")
+}
+
+model NoteContent {
+  id        String    @id @default(cuid())
+  noteId    String
+  type      String    // text, image, link
+  content   String
+  metadata  String?   // for image alt text, link title, etc
+  order     Int       // order of blocks
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  note      Note      @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@map("note_contents")
+}
+
+model NoteAccess {
+  id        String    @id @default(cuid())
+  noteId    String
+  userId    String
+  grantedAt DateTime  @default(now())
+
+  note      Note      @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([noteId, userId])
+  @@map("note_access")
+}
+
+model NoteAccessRequest {
+  id                String    @id @default(cuid())
+  noteId            String
+  requesterId       String
+  status            String    @default("pending") // pending, approved, rejected
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  note              Note      @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  requester         User      @relation("Requester", fields: [requesterId], references: [id], onDelete: Cascade)
+
+  @@unique([noteId, requesterId])
+  @@map("note_access_requests")
+}
+
+model FriendRequest {
+  id            String    @id @default(cuid())
+  requesterId    String
+  addresseeId    String
+  status         String    @default("pending") // pending, accepted, rejected
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  requester      User      @relation("FriendRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee      User      @relation("FriendRecipient", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+  @@map("friend_requests")
+}
+
+// ===== MESSAGING =====
+
+model Message {
+  id          String    @id @default(cuid())
+  content     String
+  userId      String
+  groupId     String?   // null for global chat
+  createdAt   DateTime  @default(now())
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group       StudyGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@index([userId])
+  @@map("messages")
+}
+
+// ===== MATCHING & RECOMMENDATIONS =====
+
+model UserMatch {
+  id          String    @id @default(cuid())
+  user1Id     String
+  user2Id     String
+  matchScore  Float     @default(0.0) // 0-100 compatibility score
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user1       User      @relation("User1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2       User      @relation("User2", fields: [user2Id], references: [id], onDelete: Cascade)
+
+  @@unique([user1Id, user2Id])
+  @@map("user_matches")
+}

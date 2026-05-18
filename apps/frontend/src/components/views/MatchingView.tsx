@@ -12,6 +12,7 @@ type MatchingViewProps = {
   onMatchInterestChange: (value: string) => void;
   onPartyGroupNameChange: (value: string) => void;
   onToggleMatchUser: (userId: string) => void;
+  onRequestFriend: (userId: string) => void;
   onStartMatchmakingDemo: () => void;
   onCreateDemoGroup: () => void;
   onCreatePartyGroup: () => void;
@@ -76,6 +77,9 @@ export function MatchingView(props: MatchingViewProps) {
               </label>
               <button onClick={() => props.onToggleMatchUser(item.userId)}>
                 {props.selectedMatchUserIds.includes(item.userId) ? "Remove" : "Select"}
+              </button>
+              <button onClick={() => props.onRequestFriend(item.userId)} type="button">
+                Friend
               </button>
             </li>
           ))}
