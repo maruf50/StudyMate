@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createGroup,
   getGroups,
@@ -201,6 +201,12 @@ function AppShell() {
   const [interestInput, setInterestInput] = useState("math");
   const [universityInput, setUniversityInput] = useState("");
   const [departmentInput, setDepartmentInput] = useState("");
+  const authRefreshTokenRef = useRef(0);
+  const currentUserIdRef = useRef<string | null>(user?.id ?? null);
+
+  useEffect(() => {
+    currentUserIdRef.current = user?.id ?? null;
+  }, [user?.id]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -226,7 +232,7 @@ function AppShell() {
     }
 
     void refreshCoreData();
-  }, [user]);
+  }, [user?.id]);
 
   useEffect(() => {
     const nextPath = user
@@ -337,6 +343,7 @@ function AppShell() {
   }, [activeView]);
 
   async function refreshCoreData(): Promise<void> {
+    const refreshToken = authRefreshTokenRef.current;
     const [me, statsData, matchesData, groupsData, friendRequestsData] = await Promise.all([
       getMe(),
       getStats(),
@@ -345,8 +352,14 @@ function AppShell() {
       listFriendRequests()
     ]);
 
+    if (refreshToken !== authRefreshTokenRef.current || !currentUserIdRef.current) {
+      return;
+    }
+
+    const meUser = me?.user ?? null;
+
     setUser((prev) => {
-      const base = me.user || prev;
+      const base = meUser || prev;
       if (!base) {
         return null;
       }
@@ -357,7 +370,7 @@ function AppShell() {
       };
     });
 
-    setGroups(mapGroupsToSummaries(groupsData.groups as ApiGroup[], me.user || null, selectedGroupId, activeSessionId));
+    setGroups(mapGroupsToSummaries(groupsData.groups as ApiGroup[], meUser, selectedGroupId, activeSessionId));
 
     setAllMatches(
       matchesData.matches.map((candidate: any, index: number) => ({
@@ -413,6 +426,8 @@ function AppShell() {
   }
 
   function onLogout() {
+    authRefreshTokenRef.current += 1;
+    currentUserIdRef.current = null;
     storeUserSession(null);
     setUser(null);
     setAuthError("");
@@ -437,13 +452,15 @@ function AppShell() {
       const response = await login(payload);
       const profile = await getMe();
 
-      if (!response?.user && !profile?.user) {
+      const userToUse = (response && response.user) || (profile && profile.user) || null;
+      if (!userToUse) {
         throw new Error("Unable to sign in.");
       }
 
-      await completeAuth((profile?.user || response.user) as User);
-    } catch {
-      setAuthError("Unable to sign in right now. Check your credentials and try again.");
+      await completeAuth(userToUse as User);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to sign in right now. Check your credentials and try again.";
+      setAuthError(message);
     } finally {
       setIsAuthenticating(false);
     }
@@ -455,13 +472,15 @@ function AppShell() {
       const response = await register(payload);
       const profile = await getMe();
 
-      if (!response?.user && !profile?.user) {
+      const userToUse = (response && response.user) || (profile && profile.user) || null;
+      if (!userToUse) {
         throw new Error("Unable to create account.");
       }
 
-      await completeAuth((profile?.user || response.user) as User);
-    } catch {
-      setAuthError("Unable to create your account right now. Please try again.");
+      await completeAuth(userToUse as User);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to create your account right now. Please try again.";
+      setAuthError(message);
     } finally {
       setIsAuthenticating(false);
     }
@@ -764,19 +783,12 @@ function AppShell() {
             <MatchingView
               matchInterest={matchInterest}
               availableInterests={matchingInterests}
-              partyGroupName={partyGroupName}
-              selectedMatchUserIds={selectedMatchUserIds}
-              filteredMatches={filteredMatches}
               demoCandidates={demoCandidates}
               isDemoRunning={isDemoRunning}
               demoStatus={demoStatus}
               onMatchInterestChange={setMatchInterest}
-              onPartyGroupNameChange={setPartyGroupName}
-              onToggleMatchUser={onToggleMatchUser}
-              onRequestFriend={onRequestFriend}
               onStartMatchmakingDemo={onStartMatchmakingDemo}
               onCreateDemoGroup={onCreateDemoGroup}
-              onCreatePartyGroup={onCreatePartyGroup}
             />
           ) : activeView === "groups" ? (
             <GroupsView
@@ -810,6 +822,7 @@ function AppShell() {
               friends={friends}
               friendRequests={friendRequests}
               currentUserId={user?.id || ""}
+                currentUsername={user?.username}
               onAcceptFriendRequest={onAcceptFriendRequest}
               onRejectFriendRequest={onRejectFriendRequest}
               onSendFriendRequest={onSendFriendRequest}

@@ -1,6 +1,7 @@
 import express, { Express, Request, Response } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
@@ -17,7 +18,25 @@ const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString })
 });
 
-async function getDemoUserId() {
+const requestContext = new AsyncLocalStorage<{ userId: string }>();
+
+async function getCurrentUserId(req?: Request) {
+  const contextUserId = requestContext.getStore()?.userId;
+
+  if (contextUserId) {
+    return contextUserId;
+  }
+
+  const headerUserId = req?.header("x-user-id");
+
+  if (headerUserId) {
+    const user = await prisma.user.findUnique({ where: { id: headerUserId } });
+
+    if (user) {
+      return user.id;
+    }
+  }
+
   const user = await prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
 
   if (!user) {
@@ -102,12 +121,32 @@ function serializeNote(note: {
 }
 
 // Middleware
+const allowedOrigins = new Set([
+  process.env.CORS_ORIGIN || "http://localhost:5173",
+  "http://127.0.0.1:5173"
+]);
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true,
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(async (req, _res, next) => {
+  try {
+    const currentUserId = await getCurrentUserId(req);
+    requestContext.run({ userId: currentUserId }, () => next());
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Health Check
 app.get("/api/health", (req: Request, res: Response) => {
@@ -162,7 +201,7 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
 app.get("/api/auth/me", async (req: Request, res: Response) => {
   try {
     void req;
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -181,7 +220,7 @@ app.get("/api/auth/me", async (req: Request, res: Response) => {
 app.get("/api/stats/me", async (req: Request, res: Response) => {
   try {
     void req;
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -200,7 +239,7 @@ app.get("/api/stats/me", async (req: Request, res: Response) => {
 app.get("/api/matches/users", async (req: Request, res: Response) => {
   try {
     void req;
-    const currentUserId = await getDemoUserId();
+    const currentUserId = await getCurrentUserId();
 
     const [currentUser, users] = await Promise.all([
       prisma.user.findUnique({
@@ -235,7 +274,7 @@ app.get("/api/matches/users", async (req: Request, res: Response) => {
 
 app.put("/api/profile", async (req: Request, res: Response) => {
   try {
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
     const { university, department, interests, availability } = req.body;
 
     const updatedUser = await prisma.$transaction(async (tx) => {
@@ -277,7 +316,7 @@ app.put("/api/profile", async (req: Request, res: Response) => {
 app.get("/api/friends/requests", async (req: Request, res: Response) => {
   try {
     void req;
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
 
     const requests = await prisma.friendRequest.findMany({
       where: {
@@ -304,14 +343,22 @@ app.get("/api/friends/requests", async (req: Request, res: Response) => {
 
 app.post("/api/friends/requests", async (req: Request, res: Response) => {
   try {
-    const requesterId = await getDemoUserId();
-    const { targetUserId } = req.body;
+    const requesterId = await getCurrentUserId();
+    const { targetUserId, targetUsername } = req.body;
+    const targetIdentifier = (targetUserId || targetUsername || "").trim();
 
-    if (!targetUserId || targetUserId === requesterId) {
+    if (!targetIdentifier || targetIdentifier === requesterId) {
       return res.status(400).json({ error: "Invalid friend request target" });
     }
 
-    const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
+    const targetUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: targetIdentifier },
+          { username: targetIdentifier }
+        ]
+      }
+    });
 
     if (!targetUser) {
       return res.status(404).json({ error: "User not found" });
@@ -320,8 +367,8 @@ app.post("/api/friends/requests", async (req: Request, res: Response) => {
     const existing = await prisma.friendRequest.findFirst({
       where: {
         OR: [
-          { requesterId, addresseeId: targetUserId },
-          { requesterId: targetUserId, addresseeId: requesterId }
+          { requesterId, addresseeId: targetUser.id },
+          { requesterId: targetUser.id, addresseeId: requesterId }
         ]
       },
       include: {
@@ -331,7 +378,7 @@ app.post("/api/friends/requests", async (req: Request, res: Response) => {
     });
 
     if (existing) {
-      if (existing.status === "pending" && existing.requesterId === targetUserId && existing.addresseeId === requesterId) {
+      if (existing.status === "pending" && existing.requesterId === targetUser.id && existing.addresseeId === requesterId) {
         const accepted = await prisma.friendRequest.update({
           where: { id: existing.id },
           data: { status: "accepted" },
@@ -347,7 +394,7 @@ app.post("/api/friends/requests", async (req: Request, res: Response) => {
     const request = await prisma.friendRequest.create({
       data: {
         requesterId,
-        addresseeId: targetUserId,
+        addresseeId: targetUser.id,
         status: "pending"
       },
       include: {
@@ -366,7 +413,7 @@ app.post("/api/friends/requests/:requestId/accept", async (req: Request, res: Re
   try {
     void req;
     const { requestId } = req.params;
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
 
     const existing = await prisma.friendRequest.findUnique({
       where: { id: requestId },
@@ -397,7 +444,7 @@ app.post("/api/friends/requests/:requestId/reject", async (req: Request, res: Re
   try {
     void req;
     const { requestId } = req.params;
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
 
     const existing = await prisma.friendRequest.findUnique({
       where: { id: requestId },
@@ -428,7 +475,7 @@ app.post("/api/friends/requests/:requestId/reject", async (req: Request, res: Re
 app.get("/api/friends", async (req: Request, res: Response) => {
   try {
     void req;
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
 
     const requests = await prisma.friendRequest.findMany({
       where: {
@@ -485,7 +532,7 @@ app.get("/api/chat/global", async (req: Request, res: Response) => {
 
 app.post("/api/chat/global", async (req: Request, res: Response) => {
   try {
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
     const { content } = req.body;
 
     const created = await prisma.message.create({
@@ -539,7 +586,7 @@ app.get("/api/chat/groups/:groupId", async (req: Request, res: Response) => {
 
 app.post("/api/chat/groups/:groupId", async (req: Request, res: Response) => {
   try {
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
     const { groupId } = req.params;
     const { content } = req.body;
 
@@ -573,10 +620,22 @@ app.post("/api/chat/groups/:groupId", async (req: Request, res: Response) => {
 app.get("/api/notes", async (req: Request, res: Response) => {
   try {
     void req;
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
     const friendIds = await getAcceptedFriendIds(userId);
 
     const notes = await prisma.note.findMany({
+      where: {
+        OR: [
+          { userId },
+          {
+            allowedUsers: {
+              some: {
+                userId
+              }
+            }
+          }
+        ]
+      },
       include: {
         content: true,
         user: true,
@@ -598,7 +657,7 @@ app.get("/api/notes", async (req: Request, res: Response) => {
 // Create Note
 app.post("/api/notes", async (req: Request, res: Response) => {
   try {
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
     const { title, isPrivate, content } = req.body;
 
     const note = await prisma.note.create({
@@ -644,7 +703,7 @@ app.put("/api/notes/:noteId/privacy", async (req: Request, res: Response) => {
 app.post("/api/notes/:noteId/request-access", async (req: Request, res: Response) => {
   try {
     void req;
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
     const { noteId } = req.params;
 
     const note = await prisma.note.findUnique({ where: { id: noteId } });
@@ -782,7 +841,7 @@ app.get("/api/groups", async (req: Request, res: Response) => {
 // Create Group
 app.post("/api/groups", async (req: Request, res: Response) => {
   try {
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
     const { name, topic, description } = req.body;
 
     const group = await prisma.studyGroup.create({
@@ -807,7 +866,7 @@ app.post("/api/groups", async (req: Request, res: Response) => {
 // Join Group
 app.post("/api/groups/:groupId/join", async (req: Request, res: Response) => {
   try {
-    const userId = await getDemoUserId();
+    const userId = await getCurrentUserId();
     const { groupId } = req.params;
 
     await prisma.groupMember.create({

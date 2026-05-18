@@ -9,6 +9,7 @@ import {
   Clock,
   LogOut
 } from "lucide-react";
+import type { ReactNode } from "react";
 
 type MainNavProps = {
   navItems: Array<{ id: View; label: string }>;
@@ -17,7 +18,7 @@ type MainNavProps = {
   onLogout: () => void;
 };
 
-const ICON_MAP: Record<View, React.ReactNode> = {
+const ICON_MAP: Record<View, ReactNode> = {
   dashboard: <LayoutDashboard className="nav-icon" />,
   matching: <Zap className="nav-icon" />,
   groups: <Users className="nav-icon" />,

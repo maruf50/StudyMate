@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Send, Check, X, UserPlus } from "lucide-react";
+import { Send, Check, X } from "lucide-react";
 import type { FriendRequestSummary } from "../../types";
 
 type FriendUser = {
@@ -12,6 +12,7 @@ type FriendsViewProps = {
   friends: FriendUser[];
   friendRequests: FriendRequestSummary[];
   currentUserId: string;
+  currentUsername?: string;
   onAcceptFriendRequest: (requestId: string) => void;
   onRejectFriendRequest: (requestId: string) => void;
   onSendFriendRequest: (targetUserId: string) => Promise<void>;
@@ -23,10 +24,23 @@ export function FriendsView(props: FriendsViewProps) {
   const [requestMessage, setRequestMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const incomingRequests = props.friendRequests.filter(
-    (req) => req.status === "pending" && req.isIncoming
+    (req) =>
+      req.status === "pending" &&
+      (
+        req.isIncoming === true ||
+        req.addresseeId === props.currentUserId ||
+        (props.currentUsername ? req.addresseeUsername === props.currentUsername : false)
+      )
   );
+
   const outgoingRequests = props.friendRequests.filter(
-    (req) => req.status === "pending" && req.isOutgoing
+    (req) =>
+      req.status === "pending" &&
+      (
+        req.isOutgoing === true ||
+        req.requesterId === props.currentUserId ||
+        (props.currentUsername ? req.requesterUsername === props.currentUsername : false)
+      )
   );
 
   async function handleAddFriend() {
