@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Send, Check, X, UserPlus } from "lucide-react";
 import type { FriendRequestSummary } from "../../types";
 
 type FriendUser = {
@@ -67,6 +68,7 @@ export function FriendsView(props: FriendsViewProps) {
             onClick={handleAddFriend}
             disabled={isLoadingRequest || !addFriendInput.trim()}
           >
+            <Send size={16} />
             {isLoadingRequest ? "Sending..." : "Send Request"}
           </button>
         </div>
@@ -93,13 +95,15 @@ export function FriendsView(props: FriendsViewProps) {
                     className="btn-primary"
                     onClick={() => props.onAcceptFriendRequest(request.id)}
                   >
-                    ✓ Accept
+                    <Check size={16} />
+                    Accept
                   </button>
                   <button
                     className="btn-secondary"
                     onClick={() => props.onRejectFriendRequest(request.id)}
                   >
-                    ✕ Decline
+                    <X size={16} />
+                    Decline
                   </button>
                 </div>
               </div>
