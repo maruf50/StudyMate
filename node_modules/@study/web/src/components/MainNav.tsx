@@ -25,7 +25,7 @@ export function MainNav(props: MainNavProps) {
         ))}
       </nav>
 
-      <button className="side-btn logout" onClick={props.onLogout}>
+      <button type="button" className="side-btn logout" onClick={props.onLogout}>
         Log out
       </button>
     </aside>
