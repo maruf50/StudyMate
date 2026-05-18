@@ -1,7 +1,15 @@
-export type View = "dashboard" | "matching" | "notes" | "chat" | "tracker";
+export type View = "dashboard" | "matching" | "groups" | "notes" | "friends" | "chat" | "tracker";
+
+export type NoteContent = {
+  type: "text" | "image" | "link";
+  id: string;
+  content: string;
+  metadata?: string;
+};
 
 export type Message = {
   id: string;
+  userId?: string;
   username: string;
   content: string;
   groupId?: string | null;
@@ -34,6 +42,25 @@ export type GroupSummary = {
 export type NoteSummary = {
   id: string;
   title: string;
+  userId: string;
+  ownerUsername: string;
+  isPrivate?: boolean;
+  canEdit?: boolean;
+  isFriendShared?: boolean;
+  content?: NoteContent[];
+  accessRequestCount?: number;
+};
+
+export type FriendRequestSummary = {
+  id: string;
+  requesterId: string;
+  requesterUsername: string;
+  addresseeId: string;
+  addresseeUsername: string;
+  status: "pending" | "accepted" | "rejected";
+  createdAt: string;
+  isIncoming?: boolean;
+  isOutgoing?: boolean;
 };
 
 export type InterestSegment = {

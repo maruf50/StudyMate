@@ -22,6 +22,16 @@ Run the install command from the repository root:
 npm install
 ```
 
+## 2.5 Configure the backend
+
+Copy the backend env template before starting the apps:
+
+```powershell
+copy apps\backend\.env.example apps\backend\.env
+```
+
+Update `DATABASE_URL` and any other values you need in `apps\backend\.env`.
+
 ## 3. Create a branch
 
 Before making changes, create a branch for your work:
@@ -35,6 +45,14 @@ Use a branch name that describes what you are changing.
 ## 4. Make changes
 
 Edit the files you need in VS Code or your editor of choice.
+
+To run the full app locally while you work, use:
+
+```powershell
+npm run dev
+```
+
+That starts both `apps/backend` and `apps/frontend` together from the repository root.
 
 ## 5. Check your work
 

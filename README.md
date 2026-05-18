@@ -11,8 +11,8 @@ Initial implementation of a study helper platform with:
 
 ## Project Structure
 
-- `apps/api`: Express + TypeScript backend
-- `apps/web`: React + TypeScript frontend (Vite)
+- `apps/backend`: Express + TypeScript backend
+- `apps/frontend`: React + TypeScript frontend (Vite)
 - `packages/shared`: shared types package
 
 ## Quick Start
@@ -26,7 +26,7 @@ npm install
 2. Create API env file:
 
 ```bash
-copy apps\\api\\.env.example apps\\api\\.env
+copy apps\\backend\\.env.example apps\\backend\\.env
 ```
 
 3. Run both frontend and backend:
@@ -37,6 +37,8 @@ npm run dev
 
 - API: http://localhost:4000
 - Web: http://localhost:5173
+
+The frontend uses `VITE_API_URL` when it is set, and otherwise defaults to `http://localhost:4000`. The backend allows the Vite dev server at `http://localhost:5173` through CORS.
 
 ## Contributing
 
