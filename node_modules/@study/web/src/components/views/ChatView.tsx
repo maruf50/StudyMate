@@ -15,6 +15,7 @@ type ChatViewProps = {
   onSendGlobalChat: () => void;
   onSendGroupChat: () => void;
   onSelectGroup: (groupId: string) => void;
+  onRequestFriend: (userId: string) => void;
 };
 
 export function ChatView(props: ChatViewProps) {
@@ -52,7 +53,15 @@ export function ChatView(props: ChatViewProps) {
             <div className="chat-list">
               {props.globalMessages.map((message) => (
                 <div key={message.id} className="chat-item">
-                  <strong>{message.username}</strong> {message.content}
+                  <button
+                    className="chat-user-btn"
+                    onClick={() => message.userId && props.onRequestFriend(message.userId)}
+                    type="button"
+                  >
+                    {message.username}
+                  </button>
+                  {" "}
+                  {message.content}
                 </div>
               ))}
             </div>
@@ -113,7 +122,15 @@ export function ChatView(props: ChatViewProps) {
                   ) : (
                     props.groupMessages.map((message) => (
                       <div key={message.id} className="chat-item">
-                        <strong>{message.username}</strong> {message.content}
+                        <button
+                          className="chat-user-btn"
+                          onClick={() => message.userId && props.onRequestFriend(message.userId)}
+                          type="button"
+                        >
+                          {message.username}
+                        </button>
+                        {" "}
+                        {message.content}
                       </div>
                     ))
                   )}
