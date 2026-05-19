@@ -175,3 +175,11 @@ export function FriendsView(props: FriendsViewProps) {
     </main>
   );
 }
+
+ 
+      
+         
+           
+      
+        
+     
