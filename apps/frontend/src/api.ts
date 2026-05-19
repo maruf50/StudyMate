@@ -1,4 +1,4 @@
-// Frontend-only mock API (no backend required)
+
 export type User = {
   id: string;
   email: string;
