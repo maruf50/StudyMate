@@ -38,6 +38,65 @@ const demoUser: User = {
   availability: [{ day: "mon", startHour: 18, endHour: 21 }]
 };
 
+type MockUserRecord = User & { password: string };
+
+const MOCK_USERS_STORAGE_KEY = "studygroupfinder.mockUsers";
+const AUTH_STORAGE_KEY = "studygroupfinder.session";
+const STORE_STORAGE_KEY_PREFIX = "studygroupfinder.store";
+
+function loadMockUsers(): MockUserRecord[] {
+  try {
+    const raw = window.localStorage.getItem(MOCK_USERS_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((entry): entry is MockUserRecord => {
+      return (
+        Boolean(entry) &&
+        typeof entry === "object" &&
+        typeof (entry as MockUserRecord).id === "string" &&
+        typeof (entry as MockUserRecord).email === "string" &&
+        typeof (entry as MockUserRecord).password === "string"
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+function saveMockUsers(users: MockUserRecord[]) {
+  try {
+    window.localStorage.setItem(MOCK_USERS_STORAGE_KEY, JSON.stringify(users));
+  } catch {
+    void users;
+  }
+}
+
+function loadUserFromSessionStorage(): User | null {
+  try {
+    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && "user" in parsed) {
+      const session = parsed as { user?: User };
+      return session.user ?? null;
+    }
+
+    return parsed as User;
+  } catch {
+    return null;
+  }
+}
+
 const store = {
   user: { ...demoUser },
   matches: [
@@ -69,11 +128,67 @@ function delay<T>(value: T, ms = 200) {
   return new Promise<T>((res) => setTimeout(() => res(value), ms));
 }
 
+function getStoredSessionUserId() {
+  const sessionUser = loadUserFromSessionStorage();
+  return sessionUser?.id || null;
+}
+
+function getStoreStorageKey() {
+  const sessionUserId = getStoredSessionUserId();
+  return sessionUserId ? `${STORE_STORAGE_KEY_PREFIX}:${sessionUserId}` : `${STORE_STORAGE_KEY_PREFIX}:anonymous`;
+}
+
+function loadStoreState() {
+  try {
+    const raw = window.localStorage.getItem(getStoreStorageKey());
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as any;
+    if (!parsed) return;
+
+    if (Array.isArray(parsed.friendRequests)) store.friendRequests = parsed.friendRequests;
+    if (Array.isArray(parsed.notes)) store.notes = parsed.notes;
+    if (Array.isArray(parsed.groups)) store.groups = parsed.groups;
+    if (parsed.stats && typeof parsed.stats === "object") store.stats = parsed.stats;
+    if (parsed.messages && typeof parsed.messages === "object") store.messages = parsed.messages;
+  } catch {
+    // ignore
+  }
+}
+
+function saveStoreState() {
+  try {
+    const payload = {
+      friendRequests: store.friendRequests,
+      notes: store.notes,
+      groups: store.groups,
+      stats: store.stats,
+      messages: store.messages
+    };
+    window.localStorage.setItem(getStoreStorageKey(), JSON.stringify(payload));
+  } catch {
+    // ignore
+  }
+}
+
+// hydrate persisted store on load
+loadStoreState();
+
 const API_BASE = (import.meta as any).env?.VITE_API_URL || "http://localhost:4000";
 
 async function request(path: string, opts?: RequestInit) {
   try {
-    const res = await fetch(API_BASE + path, opts);
+    loadStoreState();
+    const headers = new Headers(opts?.headers || {});
+    const sessionUserId = getStoredSessionUserId();
+
+    if (sessionUserId) {
+      headers.set("x-user-id", sessionUserId);
+    }
+
+    const res = await fetch(API_BASE + path, {
+      ...opts,
+      headers
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
@@ -90,9 +205,36 @@ export async function register(payload: { email: string; username: string; unive
   });
   if (res?.user) {
     store.user = res.user;
+    store.stats = {
+      totalXp: res.user.totalXp ?? 0,
+      totalStudyMinutes: res.user.totalStudyMinutes ?? 0
+    };
     return res;
   }
-  store.user = { ...store.user, email: payload.email, username: payload.username, university: payload.university, department: payload.department };
+
+  const users = loadMockUsers();
+  const alreadyExists = users.some((entry) => entry.email.toLowerCase() === payload.email.toLowerCase());
+  if (alreadyExists) {
+    throw new Error("An account with this email already exists.");
+  }
+
+  const mockUser: User = {
+    id: `user-${Date.now()}`,
+    email: payload.email,
+    username: payload.username,
+    university: payload.university,
+    department: payload.department,
+    totalXp: 0,
+    totalStudyMinutes: 0,
+    interests: [],
+    availability: []
+  };
+
+  users.push({ ...mockUser, password: payload.password });
+  saveMockUsers(users);
+  store.user = mockUser;
+  store.stats = { totalXp: 0, totalStudyMinutes: 0 };
+  saveStoreState();
   return delay({ token: "", user: store.user });
 }
 
@@ -102,14 +244,51 @@ export async function login(payload: { email: string; password: string }) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
-  if (res?.user) return res;
+  if (res?.user) {
+    store.user = res.user;
+    store.stats = {
+      totalXp: res.user.totalXp ?? 0,
+      totalStudyMinutes: res.user.totalStudyMinutes ?? 0
+    };
+    return res;
+  }
+
+  const users = loadMockUsers();
+  const match = users.find(
+    (entry) => entry.email.toLowerCase() === payload.email.toLowerCase() && entry.password === payload.password
+  );
+
+  if (!match) {
+    throw new Error("Invalid email or password.");
+  }
+
+  const { password: _password, ...user } = match;
+  void _password;
+  store.user = user;
+  store.stats = {
+    totalXp: user.totalXp,
+    totalStudyMinutes: user.totalStudyMinutes
+  };
+  saveStoreState();
+
   return delay({ token: "", user: store.user });
 }
 
 export async function getMe() {
   const res = await request("/api/auth/me");
   if (res?.user) return res;
-  return delay({ user: store.user });
+  const storedSessionUser = loadUserFromSessionStorage();
+  if (storedSessionUser) {
+    store.user = storedSessionUser;
+    store.stats = {
+      totalXp: storedSessionUser.totalXp,
+      totalStudyMinutes: storedSessionUser.totalStudyMinutes
+    };
+    return delay({ user: storedSessionUser });
+  }
+  // When the backend is unreachable and there is no stored session,
+  // return null so callers don't silently fall back to the demo user.
+  return null;
 }
 
 export async function saveProfile(payload: { university: string; department: string; interests: Array<{ topic: string; level: "beginner" | "intermediate" | "advanced" }>; availability: Array<{ day: string; startHour: number; endHour: number }> }) {
@@ -120,6 +299,7 @@ export async function saveProfile(payload: { university: string; department: str
   });
   if (res?.user) return res;
   store.user = { ...store.user, university: payload.university, department: payload.department, interests: payload.interests, availability: payload.availability };
+  saveStoreState();
   return delay({ user: store.user });
 }
 
@@ -149,6 +329,7 @@ export async function createGroup(payload: { name: string; topic: string; descri
   const id = `g${Date.now()}`;
   const group: Group = { id, name: payload.name, topic: payload.topic, description: payload.description, memberIds: [store.user.id, ...(payload.invitedUserIds || [])] };
   store.groups.push(group);
+  saveStoreState();
   return delay({ group });
 }
 
@@ -157,6 +338,7 @@ export async function joinGroup(groupId: string) {
   if (res) return res;
   const group = store.groups.find((g) => g.id === groupId);
   if (group && !group.memberIds.includes(store.user.id)) group.memberIds.push(store.user.id);
+  saveStoreState();
   return delay({ ok: true });
 }
 
@@ -178,6 +360,7 @@ export async function endSession(sessionId: string) {
   store.stats.totalXp += 10;
   store.user.totalStudyMinutes = store.stats.totalStudyMinutes;
   store.user.totalXp = store.stats.totalXp;
+  saveStoreState();
   return delay({ totals: store.stats });
 }
 
@@ -223,6 +406,7 @@ export async function sendFriendRequest(targetUserId: string) {
     isOutgoing: true
   };
   store.friendRequests = [...store.friendRequests, requestRecord];
+  saveStoreState();
   return delay({ request: requestRecord });
 }
 
@@ -232,6 +416,7 @@ export async function acceptFriendRequest(requestId: string) {
   const requestRecord = store.friendRequests.find((entry) => entry.id === requestId);
   if (requestRecord) {
     requestRecord.status = "accepted";
+    saveStoreState();
   }
   return delay({ request: requestRecord });
 }
@@ -242,6 +427,7 @@ export async function rejectFriendRequest(requestId: string) {
   const requestRecord = store.friendRequests.find((entry) => entry.id === requestId);
   if (requestRecord) {
     requestRecord.status = "rejected";
+    saveStoreState();
   }
   return delay({ request: requestRecord });
 }
@@ -255,6 +441,7 @@ export async function createNote(payload: { title: string; content: NoteContent[
   if (res?.note) return res;
   const note = { id: `n${Date.now()}`, userId: store.user.id, ownerUsername: store.user.username, title: payload.title, content: payload.content || [], updatedAt: new Date().toISOString(), isPrivate: payload.isPrivate ?? false, canEdit: true, accessRequestCount: 0 };
   store.notes.push(note);
+  saveStoreState();
   return delay({ note });
 }
 
@@ -264,6 +451,7 @@ export async function updateNotePrivacy(noteId: string, isPrivate: boolean) {
   const note = store.notes.find((n) => n.id === noteId && n.userId === store.user.id);
   if (note) {
     note.isPrivate = isPrivate;
+    saveStoreState();
   }
   return delay({ note });
 }
@@ -277,6 +465,7 @@ export async function requestAccessToNote(noteId: string) {
     if (!existingRequest) {
       const request: AccessRequest = { id: `ar${Date.now()}`, noteId, requesterId: store.user.id, requesterUsername: store.user.username, status: "pending", createdAt: new Date().toISOString() };
       store.accessRequests.push(request);
+      saveStoreState();
       return delay({ request });
     }
   }
@@ -296,6 +485,7 @@ export async function approveAccessRequest(requestId: string) {
   const accessRequest = store.accessRequests.find((r) => r.id === requestId);
   if (accessRequest) {
     accessRequest.status = "approved";
+    saveStoreState();
   }
   return delay({ ok: true });
 }
@@ -306,6 +496,7 @@ export async function rejectAccessRequest(requestId: string) {
   const accessRequest = store.accessRequests.find((r) => r.id === requestId);
   if (accessRequest) {
     accessRequest.status = "rejected";
+    saveStoreState();
   }
   return delay({ ok: true });
 }
@@ -332,6 +523,7 @@ export async function sendGlobalMessage(content: string) {
     createdAt: new Date().toISOString()
   };
   store.messages.global.push(message);
+  saveStoreState();
   return delay({ message });
 }
 
@@ -357,6 +549,7 @@ export async function sendGroupMessage(groupId: string, content: string) {
     createdAt: new Date().toISOString()
   };
   store.messages.groups[groupId] = [...(store.messages.groups[groupId] || []), message];
+  saveStoreState();
   return delay({ message });
 }
 

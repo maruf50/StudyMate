@@ -10,12 +10,14 @@ export function buildInterestChart(user: User | null): {
     segments: [] as InterestSegment[]
   };
 
-  if (!user || user.interests.length === 0) {
+  const interests = Array.isArray(user?.interests) ? user.interests : [];
+
+  if (!user || interests.length === 0) {
     return fallback;
   }
 
   const counts = new Map<string, number>();
-  for (const interest of user.interests) {
+  for (const interest of interests) {
     const topic = interest.topic.trim();
     counts.set(topic, (counts.get(topic) || 0) + 1);
   }
@@ -58,6 +60,7 @@ export function filterMatchesByInterest(matches: MatchCandidate[], interest: str
 
 export function uniqueInterestTopics(user: User | null): string[] {
   const set = new Set<string>();
-  user?.interests.forEach((item) => set.add(item.topic));
+  const interests = Array.isArray(user?.interests) ? user.interests : [];
+  interests.forEach((item) => set.add(item.topic));
   return Array.from(set);
 }

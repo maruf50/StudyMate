@@ -1,5 +1,6 @@
 import type { InterestSegment } from "../../types";
 import type { User } from "../../api";
+import { Star, Clock, Users, BookMarked } from "lucide-react";
 
 type DashboardViewProps = {
   user: User | null;
@@ -81,28 +82,28 @@ export function DashboardView(props: DashboardViewProps) {
       {/* Quick Stats */}
       <section className="stats-grid">
         <div className="stat-card">
-          <div className="stat-icon">⭐</div>
+          <Star className="stat-icon" />
           <div className="stat-content">
             <small>Total XP</small>
             <strong>{props.user?.totalXp ?? 0}</strong>
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon">⏱️</div>
+          <Clock className="stat-icon" />
           <div className="stat-content">
             <small>Study Hours</small>
             <strong>{props.studyHours}h</strong>
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon">👥</div>
+          <Users className="stat-icon" />
           <div className="stat-content">
             <small>Friends</small>
             <strong>{props.friends?.length ?? 0}</strong>
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon">📚</div>
+          <BookMarked className="stat-icon" />
           <div className="stat-content">
             <small>Study Groups</small>
             <strong>{props.groups?.length ?? 0}</strong>
