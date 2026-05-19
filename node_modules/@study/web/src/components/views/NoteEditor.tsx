@@ -106,7 +106,7 @@ export function NoteEditor(props: NoteEditorProps) {
           <p className="empty-state">Start adding content to your note</p>
         )}
 
-        {contentBlocks.map((block, index) => (
+        {contentBlocks.map((block) => (
           <div key={block.id} className={`content-block block-${block.type}`}>
             <div className="block-header">
               <span className="block-type">{block.type.toUpperCase()}</span>

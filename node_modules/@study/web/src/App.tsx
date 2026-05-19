@@ -35,7 +35,7 @@ import { FriendsView } from "./components/views/FriendsView";
 import { ChatView } from "./components/views/ChatView";
 import { MatchingView } from "./components/views/MatchingView";
 import { TrackerView } from "./components/views/TrackerView";
-import { NAV_ITEMS, STUDY_HOURS_GOAL, XP_GOAL } from "./constants";
+import { NAV_ITEMS, STUDY_HOURS_GOAL, STUDY_INTEREST_OPTIONS, XP_GOAL } from "./constants";
 import type { View, NoteContent } from "./types";
 import { buildInterestChart, filterMatchesByInterest, uniqueInterestTopics } from "./utils";
 import type { GroupSummary } from "./types";
@@ -197,7 +197,7 @@ function AppShell() {
   const [groupTopic, setGroupTopic] = useState("math");
   const [groupDescription, setGroupDescription] = useState("Focused evening study session");
 
-  const [interestInput, setInterestInput] = useState("math");
+  const [selectedInterestTopics, setSelectedInterestTopics] = useState<string[]>([]);
   const [universityInput, setUniversityInput] = useState("");
   const [departmentInput, setDepartmentInput] = useState("");
   const authRefreshTokenRef = useRef(0);
@@ -394,27 +394,30 @@ function AppShell() {
   const hoursProgress = !user ? 0 : Math.min(100, Math.round((studyHours / STUDY_HOURS_GOAL) * 100));
 
   const interestChart = buildInterestChart(user);
-  const availableInterests = uniqueInterestTopics(user);
+  const availableInterests = Array.from(new Set([...STUDY_INTEREST_OPTIONS, ...uniqueInterestTopics(user)]));
   const matchingInterests = Array.from(
     new Set([...availableInterests, ...allMatches.flatMap((candidate) => candidate.interests?.map((entry) => entry.topic) || [])])
   );
-  const filteredMatches = filterMatchesByInterest(allMatches, matchInterest);
+  const filteredMatches = filterMatchesByInterest(allMatches, matchInterest || selectedInterestTopics);
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) || null;
   const visibleGroupMessages = groupMessages.filter((message) => message.groupId === selectedGroupId);
 
-  useEffect(() => {
-    setUniversityInput(user?.university || "");
-    setDepartmentInput(user?.department || "");
-  }, [user?.university, user?.department]);
+  function onToggleInterestTopic(topic: string) {
+    setSelectedInterestTopics((current) =>
+      current.includes(topic) ? current.filter((item) => item !== topic) : [...current, topic]
+    );
+  }
 
   async function onSaveProfile() {
+    const existingInterestLevels = new Map((user?.interests || []).map((interest) => [interest.topic, interest.level]));
+
     const data = await saveProfile({
       university: universityInput,
       department: departmentInput,
-      interests: [
-        { topic: interestInput, level: "intermediate" },
-        { topic: "physics", level: "beginner" }
-      ],
+      interests: selectedInterestTopics.map((topic) => ({
+        topic,
+        level: existingInterestLevels.get(topic) || "intermediate"
+      })),
       availability: [
         { day: "mon", startHour: 18, endHour: 21 },
         { day: "wed", startHour: 18, endHour: 21 }
@@ -756,10 +759,11 @@ function AppShell() {
                 hoursProgress={hoursProgress}
                 studyHours={studyHours}
                 interestChart={interestChart}
-                interestInput={interestInput}
+                interestOptions={availableInterests}
+                selectedInterestTopics={selectedInterestTopics}
                 universityInput={universityInput}
                 departmentInput={departmentInput}
-                onInterestInputChange={setInterestInput}
+                onToggleInterestTopic={onToggleInterestTopic}
                 onUniversityInputChange={setUniversityInput}
                 onDepartmentInputChange={setDepartmentInput}
                 onSaveProfile={onSaveProfile}

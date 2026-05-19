@@ -91,7 +91,7 @@ export function NotesView(props: NotesViewProps) {
     return (
       <main className="view notes-editor-view">
         <NoteEditor
-          note={selectedNote}
+          note={selectedNote ?? undefined}
           isPrivate={selectedNote?.isPrivate}
           onSave={handleCreateNote}
           onCancel={() => {

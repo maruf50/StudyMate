@@ -46,15 +46,17 @@ export function buildInterestChart(user: User | null): {
   };
 }
 
-export function filterMatchesByInterest(matches: MatchCandidate[], interest: string): MatchCandidate[] {
-  if (!interest.trim()) {
+export function filterMatchesByInterest(matches: MatchCandidate[], interest: string | string[]): MatchCandidate[] {
+  const selectedInterests = Array.isArray(interest) ? interest : [interest];
+  const targets = selectedInterests.map((value) => value.trim().toLowerCase()).filter(Boolean);
+
+  if (targets.length === 0) {
     return matches;
   }
 
-  const target = interest.trim().toLowerCase();
   return matches.filter((candidate) => {
     const interests = Array.isArray(candidate.interests) ? candidate.interests : [];
-    return interests.some((entry) => entry.topic.trim().toLowerCase() === target);
+    return interests.some((entry) => targets.includes(entry.topic.trim().toLowerCase()));
   });
 }
 

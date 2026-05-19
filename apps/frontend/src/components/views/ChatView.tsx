@@ -15,6 +15,7 @@ type ChatViewProps = {
   onSendGlobalChat: () => void;
   onSendGroupChat: () => void;
   onSelectGroup: (groupId: string) => void;
+  onRequestFriend?: (targetUserId: string) => Promise<void>;
 };
 
 export function ChatView(props: ChatViewProps) {
