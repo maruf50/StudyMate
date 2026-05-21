@@ -20,6 +20,18 @@ type BackendGroup = {
   memberIds?: string[];
   members?: Array<{ userId: string }>;
 };
+type GroupInvite = {
+  id: string;
+  groupId: string;
+  groupName: string;
+  groupTopic: string;
+  inviterId: string;
+  inviterUsername: string;
+  inviteeId: string;
+  inviteeUsername: string;
+  status: "pending" | "accepted" | "rejected";
+  createdAt: string;
+};
 type NoteContent = { type: "text" | "image" | "link"; id: string; content: string; metadata?: string };
 type Note = { id: string; userId: string; ownerUsername: string; title: string; content: NoteContent[]; isPrivate: boolean; canEdit?: boolean; isFriendShared?: boolean; accessRequestCount?: number; updatedAt?: string };
 type AccessRequest = { id: string; noteId: string; requesterId: string; requesterUsername: string; status: "pending" | "approved" | "rejected"; createdAt: string };
@@ -43,6 +55,7 @@ type MockUserRecord = User & { password: string };
 const MOCK_USERS_STORAGE_KEY = "studygroupfinder.mockUsers";
 const AUTH_STORAGE_KEY = "studygroupfinder.session";
 const STORE_STORAGE_KEY_PREFIX = "studygroupfinder.store";
+const GROUP_INVITES_STORAGE_KEY = "studygroupfinder.groupInvites";
 
 function loadMockUsers(): MockUserRecord[] {
   try {
@@ -76,6 +89,91 @@ function saveMockUsers(users: MockUserRecord[]) {
   } catch {
     void users;
   }
+}
+
+function loadGroupInvites(): GroupInvite[] {
+  try {
+    const raw = window.localStorage.getItem(GROUP_INVITES_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((entry): entry is GroupInvite => {
+      return (
+        Boolean(entry) &&
+        typeof entry === "object" &&
+        typeof (entry as GroupInvite).id === "string" &&
+        typeof (entry as GroupInvite).groupId === "string" &&
+        typeof (entry as GroupInvite).inviteeId === "string" &&
+        typeof (entry as GroupInvite).status === "string"
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+function saveGroupInvites(invites: GroupInvite[]) {
+  try {
+    window.localStorage.setItem(GROUP_INVITES_STORAGE_KEY, JSON.stringify(invites));
+  } catch {
+    void invites;
+  }
+}
+
+function upsertGroupInvites(nextInvites: GroupInvite[]) {
+  const current = loadGroupInvites();
+  const updated = [...current];
+
+  for (const invite of nextInvites) {
+    const index = updated.findIndex((entry) => entry.id === invite.id);
+    if (index >= 0) {
+      updated[index] = invite;
+    } else {
+      updated.push(invite);
+    }
+  }
+
+  saveGroupInvites(updated);
+}
+
+function getCurrentInviteeId() {
+  return getStoredSessionUserId() || store.user.id;
+}
+
+function buildGroupInvites(group: Group, invitedUsers: Array<{ id: string; username: string }>): GroupInvite[] {
+  const uniqueInvites = invitedUsers.filter((invitee) => invitee.id && invitee.id !== store.user.id);
+
+  return uniqueInvites.map((invitee) => ({
+    id: `gi-${group.id}-${invitee.id}`,
+    groupId: group.id,
+    groupName: group.name,
+    groupTopic: group.topic,
+    inviterId: store.user.id,
+    inviterUsername: store.user.username,
+    inviteeId: invitee.id,
+    inviteeUsername: invitee.username,
+    status: "pending",
+    createdAt: new Date().toISOString()
+  }));
+}
+
+function updateGroupInviteStatus(inviteId: string, status: GroupInvite["status"]) {
+  const invites = loadGroupInvites();
+  const invite = invites.find((entry) => entry.id === inviteId);
+
+  if (!invite) {
+    return null;
+  }
+
+  invite.status = status;
+  saveGroupInvites(invites);
+  return invite;
 }
 
 function loadUserFromSessionStorage(): User | null {
@@ -316,20 +414,50 @@ export async function getGroups() {
   return delay({ groups: store.groups });
 }
 
-export async function createGroup(payload: { name: string; topic: string; description: string; invitedUserIds?: string[] }) {
+export async function createGroup(payload: { name: string; topic: string; description: string; invitedUserIds?: string[]; invitedUsers?: Array<{ id: string; username: string }> }) {
   const res = await request("/api/groups", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
+  const invitedUsers = payload.invitedUsers ?? (payload.invitedUserIds || []).map((userId) => ({ id: userId, username: userId }));
   if (res?.group) {
+    if (invitedUsers.length > 0) {
+      upsertGroupInvites(buildGroupInvites(normalizeGroup(res.group), invitedUsers));
+    }
     return { group: normalizeGroup(res.group) };
   }
   const id = `g${Date.now()}`;
-  const group: Group = { id, name: payload.name, topic: payload.topic, description: payload.description, memberIds: [store.user.id, ...(payload.invitedUserIds || [])] };
+  const group: Group = { id, name: payload.name, topic: payload.topic, description: payload.description, memberIds: [store.user.id] };
   store.groups.push(group);
+  if (invitedUsers.length > 0) {
+    upsertGroupInvites(buildGroupInvites(group, invitedUsers));
+  }
   saveStoreState();
   return delay({ group });
+}
+
+export async function listGroupInvites() {
+  const currentUserId = getCurrentInviteeId();
+  return delay({ invites: loadGroupInvites().filter((invite) => invite.inviteeId === currentUserId) });
+}
+
+export async function acceptGroupInvite(inviteId: string) {
+  const invite = updateGroupInviteStatus(inviteId, "accepted");
+  if (!invite) {
+    return delay({ invite: null });
+  }
+
+  return delay({ invite });
+}
+
+export async function rejectGroupInvite(inviteId: string) {
+  const invite = updateGroupInviteStatus(inviteId, "rejected");
+  if (!invite) {
+    return delay({ invite: null });
+  }
+
+  return delay({ invite });
 }
 
 export async function joinGroup(groupId: string) {

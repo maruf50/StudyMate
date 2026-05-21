@@ -9,6 +9,9 @@ import {
   getStats,
   joinGroup,
   saveProfile,
+  listGroupInvites,
+  acceptGroupInvite,
+  rejectGroupInvite,
   createNote,
   updateNotePrivacy,
   approveAccessRequest,
@@ -43,6 +46,7 @@ import type { NoteSummary } from "./types";
 import type { Message } from "./types";
 import type { MatchCandidate } from "./types";
 import type { FriendRequestSummary } from "./types";
+import type { GroupInviteSummary } from "./types";
 
 type ApiGroup = {
   id: string;
@@ -170,6 +174,7 @@ function AppShell() {
   ]);
   const [accessRequests, setAccessRequests] = useState<any[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequestSummary[]>([]);
+  const [groupInvites, setGroupInvites] = useState<GroupInviteSummary[]>([]);
   const [friends, setFriends] = useState<Array<{ id: string; username: string; userId: string }>>([]);
   const [globalMessages, setGlobalMessages] = useState<Message[]>([
     {
@@ -202,6 +207,17 @@ function AppShell() {
   const [departmentInput, setDepartmentInput] = useState("");
   const authRefreshTokenRef = useRef(0);
   const currentUserIdRef = useRef<string | null>(user?.id ?? null);
+
+  useEffect(() => {
+    if (!user) {
+      setUniversityInput("");
+      setDepartmentInput("");
+      return;
+    }
+
+    setUniversityInput(user.university || "");
+    setDepartmentInput(user.department || "");
+  }, [user?.id, user?.university, user?.department]);
 
   useEffect(() => {
     currentUserIdRef.current = user?.id ?? null;
@@ -343,12 +359,13 @@ function AppShell() {
 
   async function refreshCoreData(): Promise<void> {
     const refreshToken = authRefreshTokenRef.current;
-    const [me, statsData, matchesData, groupsData, friendRequestsData] = await Promise.all([
+    const [me, statsData, matchesData, groupsData, friendRequestsData, groupInvitesData] = await Promise.all([
       getMe(),
       getStats(),
       getMatches(),
       getGroups(),
-      listFriendRequests()
+      listFriendRequests(),
+      listGroupInvites()
     ]);
 
     if (refreshToken !== authRefreshTokenRef.current || !currentUserIdRef.current) {
@@ -380,6 +397,10 @@ function AppShell() {
 
     if (friendRequestsData?.requests) {
       setFriendRequests(friendRequestsData.requests);
+    }
+
+    if (groupInvitesData?.invites) {
+      setGroupInvites(groupInvitesData.invites);
     }
   }
 
@@ -432,6 +453,7 @@ function AppShell() {
     currentUserIdRef.current = null;
     storeUserSession(null);
     setUser(null);
+    setGroupInvites([]);
     setAuthError("");
     setAuthMode("login");
     setActiveView("dashboard");
@@ -650,6 +672,8 @@ function AppShell() {
   function onStartMatchmakingDemo() {
     setIsDemoRunning(true);
     setDemoStatus("Searching for the best study partners...");
+    setSelectedMatchUserIds([]);
+    setDemoCandidates([]);
 
     window.setTimeout(() => {
       const candidates = filteredMatches.slice(0, 3);
@@ -664,21 +688,23 @@ function AppShell() {
   }
 
   async function onCreateDemoGroup() {
-    if (demoCandidates.length === 0) {
+    const selectedCandidates = demoCandidates.filter((candidate) => selectedMatchUserIds.includes(candidate.userId));
+
+    if (selectedCandidates.length === 0) {
       return;
     }
 
-    const candidateIds = demoCandidates.map((candidate) => candidate.userId);
+    const candidateIds = selectedCandidates.map((candidate) => candidate.userId);
     const groupName = `Match Demo ${new Date().toLocaleTimeString()}`;
 
-    setSelectedMatchUserIds(candidateIds);
     setDemoStatus("Creating group from matching results...");
 
     const response = await createGroup({
       name: groupName,
       topic: matchInterest || "general",
       description: "Created from Matching view",
-      invitedUserIds: candidateIds
+      invitedUserIds: candidateIds,
+      invitedUsers: selectedCandidates.map((candidate) => ({ id: candidate.userId, username: candidate.username }))
     });
 
     setSelectedGroupId(response.group.id);
@@ -686,6 +712,41 @@ function AppShell() {
     setActiveView("chat");
     setDemoStatus(`Created group \"${response.group.name}\" with ${candidateIds.length} invite(s).`);
     setSelectedMatchUserIds([]);
+  }
+
+  function onToggleMatchCandidateSelection(candidate: MatchCandidate) {
+    setSelectedMatchUserIds((current) =>
+      current.includes(candidate.userId)
+        ? current.filter((userId) => userId !== candidate.userId)
+        : [...current, candidate.userId]
+    );
+  }
+
+  function onSelectAllDemoCandidates() {
+    const candidateIds = demoCandidates.map((candidate) => candidate.userId);
+
+    setSelectedMatchUserIds((current) =>
+      current.length === candidateIds.length && candidateIds.every((candidateId) => current.includes(candidateId))
+        ? []
+        : candidateIds
+    );
+  }
+
+  async function onAcceptGroupInvite(inviteId: string) {
+    const invite = groupInvites.find((entry) => entry.id === inviteId);
+    if (!invite) {
+      return;
+    }
+
+    await joinGroup(invite.groupId);
+    await acceptGroupInvite(inviteId);
+    setGroupInvites((current) => current.map((entry) => (entry.id === inviteId ? { ...entry, status: "accepted" } : entry)));
+    await refreshCoreData();
+  }
+
+  async function onRejectGroupInvite(inviteId: string) {
+    await rejectGroupInvite(inviteId);
+    setGroupInvites((current) => current.map((entry) => (entry.id === inviteId ? { ...entry, status: "rejected" } : entry)));
   }
 
   function onStartSession() {
@@ -710,7 +771,7 @@ function AppShell() {
         : activeView === "groups"
           ? [`${groups.length} groups`, selectedGroupId ? `Active ${selectedGroupId}` : "No active group"]
           : activeView === "friends"
-            ? [`${friends.length} friends`, `${friendRequests.filter(r => r.status === "pending").length} pending`]
+              ? [`${friends.length} friends`, `${friendRequests.filter((r) => r.status === "pending").length} pending`, `${groupInvites.filter((invite) => invite.status === "pending").length} invites`]
             : activeView === "tracker"
               ? [trackerSessionId ? "Session Active" : "No Session"]
               : activeView === "chat"
@@ -776,11 +837,14 @@ function AppShell() {
               matchInterest={matchInterest}
               availableInterests={matchingInterests}
               demoCandidates={demoCandidates}
+              selectedMatchUserIds={selectedMatchUserIds}
               isDemoRunning={isDemoRunning}
               demoStatus={demoStatus}
               onMatchInterestChange={setMatchInterest}
               onStartMatchmakingDemo={onStartMatchmakingDemo}
               onCreateDemoGroup={onCreateDemoGroup}
+              onSelectAllDemoCandidates={onSelectAllDemoCandidates}
+              onToggleMatchCandidateSelection={onToggleMatchCandidateSelection}
             />
           ) : activeView === "groups" ? (
             <GroupsView
@@ -813,11 +877,14 @@ function AppShell() {
             <FriendsView
               friends={friends}
               friendRequests={friendRequests}
+              groupInvites={groupInvites}
               currentUserId={user?.id || ""}
-                currentUsername={user?.username}
+              currentUsername={user?.username}
               onAcceptFriendRequest={onAcceptFriendRequest}
               onRejectFriendRequest={onRejectFriendRequest}
               onSendFriendRequest={onSendFriendRequest}
+              onAcceptGroupInvite={onAcceptGroupInvite}
+              onRejectGroupInvite={onRejectGroupInvite}
             />
           ) : activeView === "chat" ? (
             <ChatView

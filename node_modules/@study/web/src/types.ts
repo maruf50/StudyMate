@@ -19,6 +19,21 @@ export type FriendRequestSummary = {
   isOutgoing?: boolean;
 };
 
+export type GroupInviteSummary = {
+  id: string;
+  groupId: string;
+  groupName: string;
+  groupTopic: string;
+  inviterId: string;
+  inviterUsername: string;
+  inviteeId: string;
+  inviteeUsername: string;
+  status: "pending" | "accepted" | "rejected";
+  createdAt: string;
+  isIncoming?: boolean;
+  isOutgoing?: boolean;
+};
+
 export type Message = {
   id: string;
   username: string;
