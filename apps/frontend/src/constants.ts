@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 export const XP_GOAL = 500;
 export const STUDY_HOURS_GOAL = 20;
-
+ 
 export const STUDY_INTEREST_OPTIONS = [
   "math",
   "physics",

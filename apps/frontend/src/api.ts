@@ -272,8 +272,7 @@ export async function login(payload: { email: string; password: string }) {
   saveStoreState();
 
   return delay({ token: "", user: store.user });
-}
-
+} 
 export async function getMe() {
   const res = await request("/api/auth/me");
   if (res?.user) return res;
