@@ -171,6 +171,29 @@ async function main() {
   });
   void note3;
 
+  await prisma.note.create({
+    data: {
+      userId: user2.id,
+      title: "Alice's Public Study Tips",
+      isPrivate: false,
+      content: {
+        create: [
+          {
+            type: "text",
+            content: "Public notes work best when they are short, structured, and easy to skim.",
+            order: 0,
+          },
+          {
+            type: "link",
+            content: "https://www.khanacademy.org/",
+            metadata: "Learning resource",
+            order: 1,
+          },
+        ],
+      },
+    },
+  });
+
   // Create study groups
   const group1 = await prisma.studyGroup.create({
     data: {

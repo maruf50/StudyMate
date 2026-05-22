@@ -258,7 +258,25 @@ const store = {
       creatorUsername: "Demo Student"
     }
   ] as Group[],
-  notes: [] as Note[],
+  notes: [
+    {
+      id: "n-public-1",
+      userId: "u2",
+      ownerUsername: "Alice",
+      title: "Public Calculus Tips",
+      content: [
+        {
+          id: "block-1",
+          type: "text",
+          content: "A short public checklist for staying on track in calculus review.",
+          metadata: "Public note"
+        }
+      ],
+      isPrivate: false,
+      canEdit: false,
+      updatedAt: new Date().toISOString()
+    }
+  ] as Note[],
   accessRequests: [] as AccessRequest[],
   friendRequests: [] as FriendRequest[],
   stats: { totalXp: demoUser.totalXp, totalStudyMinutes: demoUser.totalStudyMinutes },
@@ -637,8 +655,9 @@ export async function getStats() {
   return delay(store.stats);
 }
 
-export async function listNotes() {
-  const res = await request("/api/notes");
+export async function listNotes(scope?: "mine" | "public") {
+  const query = scope === "public" ? "?scope=public" : "";
+  const res = await request(`/api/notes${query}`);
   if (res?.notes) return res;
   return delay({ notes: store.notes });
 }

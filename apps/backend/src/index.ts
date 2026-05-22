@@ -638,29 +638,40 @@ app.post("/api/chat/groups/:groupId", async (req: Request, res: Response) => {
 // Get User's Notes
 app.get("/api/notes", async (req: Request, res: Response) => {
   try {
-    void req;
+    const scope = typeof req.query.scope === "string" ? req.query.scope : "mine";
     const userId = await getCurrentUserId();
     const friendIds = await getAcceptedFriendIds(userId);
 
     const notes = await prisma.note.findMany({
-      where: {
-        OR: [
-          { userId },
-          {
-            allowedUsers: {
-              some: {
-                userId
-              }
+      where:
+        scope === "public"
+          ? { isPrivate: false }
+          : {
+              OR: [
+                { userId },
+                {
+                  allowedUsers: {
+                    some: {
+                      userId
+                    }
+                  }
+                }
+              ]
+            },
+      include:
+        scope === "public"
+          ? {
+              content: true,
+              user: true,
+              accessRequests: true,
+              allowedUsers: true
             }
-          }
-        ]
-      },
-      include: {
-        content: true,
-        user: true,
-        accessRequests: true,
-        allowedUsers: true
-      },
+          : {
+              content: true,
+              user: true,
+              accessRequests: true,
+              allowedUsers: true
+            },
     });
 
     const visibleNotes = notes
