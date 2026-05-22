@@ -1,4 +1,38 @@
-export type View = "dashboard" | "matching" | "groups" | "notes" | "chat" | "tracker";
+export type View = "dashboard" | "matching" | "groups" | "notes" | "friends" | "chat" | "tracker";
+
+export type NoteContent = {
+  type: "text" | "image" | "link";
+  id: string;
+  content: string;
+  metadata?: string;
+};
+
+export type FriendRequestSummary = {
+  id: string;
+  requesterId: string;
+  requesterUsername: string;
+  addresseeId: string;
+  addresseeUsername: string;
+  status: "pending" | "accepted" | "rejected";
+  createdAt: string;
+  isIncoming?: boolean;
+  isOutgoing?: boolean;
+};
+
+export type GroupInviteSummary = {
+  id: string;
+  groupId: string;
+  groupName: string;
+  groupTopic: string;
+  inviterId: string;
+  inviterUsername: string;
+  inviteeId: string;
+  inviteeUsername: string;
+  status: "pending" | "accepted" | "rejected";
+  createdAt: string;
+  isIncoming?: boolean;
+  isOutgoing?: boolean;
+};
 
 export type Message = {
   id: string;
@@ -23,6 +57,7 @@ export type GroupSummary = {
   studyTopic: string;
   studyDescription: string;
   leaderName: string;
+  creatorId?: string;
   totalStudyMinutes: number;
   isActive: boolean;
   activeSessionCount: number;
@@ -34,6 +69,14 @@ export type GroupSummary = {
 export type NoteSummary = {
   id: string;
   title: string;
+  userId?: string;
+  ownerUsername?: string;
+  content?: NoteContent[];
+  isPrivate?: boolean;
+  canEdit?: boolean;
+  isFriendShared?: boolean;
+  accessRequestCount?: number;
+  updatedAt?: string;
 };
 
 export type InterestSegment = {

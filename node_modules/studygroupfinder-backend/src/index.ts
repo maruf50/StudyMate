@@ -59,6 +59,21 @@ async function getAcceptedFriendIds(userId: string) {
   );
 }
 
+async function awardXp(userId: string, xp: number) {
+  if (xp <= 0) {
+    return;
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      totalXp: {
+        increment: xp
+      }
+    }
+  });
+}
+
 function serializeFriendRequest(request: {
   id: string;
   requesterId: string;
@@ -544,6 +559,8 @@ app.post("/api/chat/global", async (req: Request, res: Response) => {
       include: { user: true }
     });
 
+
+    await awardXp(userId, content?.length > 80 ? 2 : 1);
     res.status(201).json({
       message: {
         id: created.id,
@@ -599,6 +616,8 @@ app.post("/api/chat/groups/:groupId", async (req: Request, res: Response) => {
       include: { user: true }
     });
 
+
+    await awardXp(userId, content?.length > 80 ? 2 : 1);
     res.status(201).json({
       message: {
         id: created.id,
@@ -677,6 +696,10 @@ app.post("/api/notes", async (req: Request, res: Response) => {
       include: { content: true },
     });
 
+    if (!isPrivate) {
+      await awardXp(userId, 20);
+    }
+
     return res.status(201).json({ note });
   } catch (error) {
     return res.status(400).json({ error: "Failed to create note" });
@@ -689,10 +712,19 @@ app.put("/api/notes/:noteId/privacy", async (req: Request, res: Response) => {
     const { noteId } = req.params;
     const { isPrivate } = req.body;
 
+    const existingNote = await prisma.note.findUnique({
+      where: { id: noteId },
+      select: { isPrivate: true, userId: true }
+    });
+
     const note = await prisma.note.update({
       where: { id: noteId },
       data: { isPrivate },
     });
+
+    if (existingNote?.isPrivate && !isPrivate) {
+      await awardXp(existingNote.userId, 20);
+    }
 
     return res.json({ note });
   } catch (error) {

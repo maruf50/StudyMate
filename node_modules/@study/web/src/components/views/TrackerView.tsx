@@ -3,6 +3,7 @@ type TrackerViewProps = {
   xpProgress: number;
   hoursProgress: number;
   activeSessionId: string;
+  sessionTimerLabel: string;
   onStartSession: () => void;
   onEndSession: () => void;
 };
@@ -39,7 +40,7 @@ export function TrackerView(props: TrackerViewProps) {
             End Session
           </button>
         </div>
-        <p>{props.activeSessionId ? "Session running" : "No active session"}</p>
+        <p>{props.activeSessionId ? `Session running · ${props.sessionTimerLabel}` : "No active session"}</p>
       </section>
     </main>
   );

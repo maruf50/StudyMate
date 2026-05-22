@@ -9,6 +9,9 @@ import {
   getStats,
   joinGroup,
   saveProfile,
+  listGroupInvites,
+  acceptGroupInvite,
+  rejectGroupInvite,
   createNote,
   updateNotePrivacy,
   approveAccessRequest,
@@ -24,6 +27,7 @@ import {
   listGroupMessages,
   sendGlobalMessage,
   sendGroupMessage
+  , startSession, endSession, deleteGroup
 } from "./api";
 import type { User } from "./api";
 import { AuthScreen, type AuthMode } from "./components/AuthScreen";
@@ -35,7 +39,7 @@ import { FriendsView } from "./components/views/FriendsView";
 import { ChatView } from "./components/views/ChatView";
 import { MatchingView } from "./components/views/MatchingView";
 import { TrackerView } from "./components/views/TrackerView";
-import { NAV_ITEMS, STUDY_HOURS_GOAL, XP_GOAL } from "./constants";
+import { NAV_ITEMS, STUDY_HOURS_GOAL, STUDY_INTEREST_OPTIONS, XP_GOAL } from "./constants";
 import type { View, NoteContent } from "./types";
 import { buildInterestChart, filterMatchesByInterest, uniqueInterestTopics } from "./utils";
 import type { GroupSummary } from "./types";
@@ -43,6 +47,7 @@ import type { NoteSummary } from "./types";
 import type { Message } from "./types";
 import type { MatchCandidate } from "./types";
 import type { FriendRequestSummary } from "./types";
+import type { GroupInviteSummary } from "./types";
 
 type ApiGroup = {
   id: string;
@@ -51,6 +56,9 @@ type ApiGroup = {
   description: string;
   memberIds?: string[];
   members?: Array<{ userId: string }>;
+  creatorId?: string;
+  creatorUsername?: string;
+  creator?: { id?: string; username?: string };
 };
 
 const AUTH_STORAGE_KEY = "studygroupfinder.session";
@@ -137,11 +145,12 @@ function mapGroupsToSummaries(groups: ApiGroup[], user: User | null, selectedGro
     return {
       id: group.id,
       name: group.name,
+      creatorId: group.creatorId ?? group.creator?.id,
       memberCount,
       maxMembers: 6,
       studyTopic: group.topic,
       studyDescription: group.description,
-      leaderName: user?.username || "Study Lead",
+      leaderName: group.creator?.username || group.creatorUsername || "Study Lead",
       totalStudyMinutes: memberCount * 45,
       isActive,
       activeSessionCount: isActive ? 1 : 0,
@@ -170,6 +179,7 @@ function AppShell() {
   ]);
   const [accessRequests, setAccessRequests] = useState<any[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequestSummary[]>([]);
+  const [groupInvites, setGroupInvites] = useState<GroupInviteSummary[]>([]);
   const [friends, setFriends] = useState<Array<{ id: string; username: string; userId: string }>>([]);
   const [globalMessages, setGlobalMessages] = useState<Message[]>([
     {
@@ -183,6 +193,7 @@ function AppShell() {
   const [groupMessages, setGroupMessages] = useState<Message[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState("");
   const [activeSessionId, setActiveSessionId] = useState("");
+  const [activeSessionStartedAt, setActiveSessionStartedAt] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [groupChatInput, setGroupChatInput] = useState("");
   const [matchInterest, setMatchInterest] = useState("");
@@ -194,14 +205,25 @@ function AppShell() {
   const [trackerSessionId, setTrackerSessionId] = useState("");
   const [groups, setGroups] = useState<GroupSummary[]>([]);
   const [groupName, setGroupName] = useState("Study Group");
-  const [groupTopic, setGroupTopic] = useState("math");
-  const [groupDescription, setGroupDescription] = useState("Focused evening study session");
+  const [groupSearchName, setGroupSearchName] = useState("");
+  const [groupSearchInterest, setGroupSearchInterest] = useState("");
 
-  const [interestInput, setInterestInput] = useState("math");
+  const [selectedInterestTopics, setSelectedInterestTopics] = useState<string[]>([]);
   const [universityInput, setUniversityInput] = useState("");
   const [departmentInput, setDepartmentInput] = useState("");
   const authRefreshTokenRef = useRef(0);
   const currentUserIdRef = useRef<string | null>(user?.id ?? null);
+
+  useEffect(() => {
+    if (!user) {
+      setUniversityInput("");
+      setDepartmentInput("");
+      return;
+    }
+
+    setUniversityInput(user.university || "");
+    setDepartmentInput(user.department || "");
+  }, [user?.id, user?.university, user?.department]);
 
   useEffect(() => {
     currentUserIdRef.current = user?.id ?? null;
@@ -343,12 +365,13 @@ function AppShell() {
 
   async function refreshCoreData(): Promise<void> {
     const refreshToken = authRefreshTokenRef.current;
-    const [me, statsData, matchesData, groupsData, friendRequestsData] = await Promise.all([
+    const [me, statsData, matchesData, groupsData, friendRequestsData, groupInvitesData] = await Promise.all([
       getMe(),
       getStats(),
       getMatches(),
       getGroups(),
-      listFriendRequests()
+      listFriendRequests(),
+      listGroupInvites()
     ]);
 
     if (refreshToken !== authRefreshTokenRef.current || !currentUserIdRef.current) {
@@ -381,6 +404,10 @@ function AppShell() {
     if (friendRequestsData?.requests) {
       setFriendRequests(friendRequestsData.requests);
     }
+
+    if (groupInvitesData?.invites) {
+      setGroupInvites(groupInvitesData.invites);
+    }
   }
 
   const statsText = !user
@@ -394,27 +421,71 @@ function AppShell() {
   const hoursProgress = !user ? 0 : Math.min(100, Math.round((studyHours / STUDY_HOURS_GOAL) * 100));
 
   const interestChart = buildInterestChart(user);
-  const availableInterests = uniqueInterestTopics(user);
+  const availableInterests = Array.from(new Set([...STUDY_INTEREST_OPTIONS, ...uniqueInterestTopics(user)]));
   const matchingInterests = Array.from(
     new Set([...availableInterests, ...allMatches.flatMap((candidate) => candidate.interests?.map((entry) => entry.topic) || [])])
   );
-  const filteredMatches = filterMatchesByInterest(allMatches, matchInterest);
+  const groupInterestOptions = Array.from(new Set([...availableInterests, ...groups.map((group) => group.studyTopic)]));
+  const filteredMatches = filterMatchesByInterest(allMatches, matchInterest || selectedInterestTopics);
+  const filteredGroups = groups.filter((group) => {
+    const matchesName = groupSearchName.trim()
+      ? group.name.toLowerCase().includes(groupSearchName.trim().toLowerCase())
+      : true;
+    const matchesInterest = groupSearchInterest.trim()
+      ? group.studyTopic.trim().toLowerCase() === groupSearchInterest.trim().toLowerCase()
+      : true;
+
+    return matchesName && matchesInterest;
+  });
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) || null;
   const visibleGroupMessages = groupMessages.filter((message) => message.groupId === selectedGroupId);
 
+  const [sessionElapsedMs, setSessionElapsedMs] = useState(0);
+
   useEffect(() => {
-    setUniversityInput(user?.university || "");
-    setDepartmentInput(user?.department || "");
-  }, [user?.university, user?.department]);
+    if (!activeSessionStartedAt || !trackerSessionId) {
+      setSessionElapsedMs(0);
+      return;
+    }
+
+    const updateElapsed = () => {
+      const startedAt = Date.parse(activeSessionStartedAt);
+      if (Number.isNaN(startedAt)) {
+        setSessionElapsedMs(0);
+        return;
+      }
+
+      setSessionElapsedMs(Math.max(0, Date.now() - startedAt));
+    };
+
+    updateElapsed();
+    const timerId = window.setInterval(updateElapsed, 1000);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [activeSessionStartedAt, trackerSessionId]);
+
+  const sessionTimerLabel = trackerSessionId
+    ? new Date(sessionElapsedMs).toISOString().slice(11, 19)
+    : "00:00:00";
+
+  function onToggleInterestTopic(topic: string) {
+    setSelectedInterestTopics((current) =>
+      current.includes(topic) ? current.filter((item) => item !== topic) : [...current, topic]
+    );
+  }
 
   async function onSaveProfile() {
+    const existingInterestLevels = new Map((user?.interests || []).map((interest) => [interest.topic, interest.level]));
+
     const data = await saveProfile({
       university: universityInput,
       department: departmentInput,
-      interests: [
-        { topic: interestInput, level: "intermediate" },
-        { topic: "physics", level: "beginner" }
-      ],
+      interests: selectedInterestTopics.map((topic) => ({
+        topic,
+        level: existingInterestLevels.get(topic) || "intermediate"
+      })),
       availability: [
         { day: "mon", startHour: 18, endHour: 21 },
         { day: "wed", startHour: 18, endHour: 21 }
@@ -429,6 +500,7 @@ function AppShell() {
     currentUserIdRef.current = null;
     storeUserSession(null);
     setUser(null);
+    setGroupInvites([]);
     setAuthError("");
     setAuthMode("login");
     setActiveView("dashboard");
@@ -517,6 +589,7 @@ function AppShell() {
     });
 
     setNotes((prev) => [...prev, response.note]);
+    await refreshCoreData();
   }
 
   async function onToggleNotePrivacy(noteId: string, isPrivate: boolean) {
@@ -526,6 +599,7 @@ function AppShell() {
         note.id === noteId ? { ...note, isPrivate } : note
       )
     );
+    await refreshCoreData();
   }
 
   async function onApproveAccessRequest(requestId: string) {
@@ -596,6 +670,7 @@ function AppShell() {
       setGlobalMessages((current) => [...current, response.message]);
     }
     setChatInput("");
+    await refreshCoreData();
   }
 
   async function onSendGroupChat() {
@@ -603,8 +678,13 @@ function AppShell() {
       return;
     }
 
-    if (!activeSessionId) {
-      setActiveSessionId(`s${Date.now()}`);
+    if (!trackerSessionId) {
+      try {
+        const s = await startSession(selectedGroupId);
+        if (s?.session?.id) setTrackerSessionId(s.session.id);
+      } catch (e) {
+        console.warn("failed to start session on first message", e);
+      }
     }
 
     const response = await sendGroupMessage(selectedGroupId, groupChatInput.trim());
@@ -612,23 +692,6 @@ function AppShell() {
       setGroupMessages((current) => [...current, response.message]);
     }
     setGroupChatInput("");
-  }
-
-  async function onCreateGroup() {
-    const name = groupName.trim() || "Study Group";
-    const topic = groupTopic.trim() || "general";
-    const description = groupDescription.trim() || "Focused study session";
-
-    const response = await createGroup({
-      name,
-      topic,
-      description
-    });
-
-    setSelectedGroupId(response.group.id);
-    setGroupName("Study Group");
-    setGroupTopic("math");
-    setGroupDescription("Focused evening study session");
     await refreshCoreData();
   }
 
@@ -636,6 +699,41 @@ function AppShell() {
     await joinGroup(groupId);
     setSelectedGroupId(groupId);
     await refreshCoreData();
+  }
+
+  async function onDeleteGroup(groupId: string) {
+    // optimistic UI: remove group locally first
+    console.log(
+      "onDeleteGroup called for",
+      groupId,
+      "current groups:",
+      groups.map((g) => ({ id: g.id, creatorId: (g as any).creatorId ?? (g as any).creator?.id }))
+    );
+    const previous = groups;
+    setGroups((current) => current.filter((g) => g.id !== groupId));
+
+    try {
+        const res = await deleteGroup(groupId);
+        console.log("deleteGroup response:", res);
+        if (res?.ok) {
+          // If the mock indicates the group wasn't present locally, the backend
+          // likely owns the record and returned a 404. In that case don't
+          // immediately re-fetch from the backend (which would re-introduce
+          // the group) — keep the optimistic removal.
+          if ((res as any).note === "not_in_mock") {
+            console.log("deleteGroup: removed locally; backend-not-found treated as success");
+          } else {
+            await refreshCoreData();
+          }
+        } else {
+          console.warn("deleteGroup failed", res);
+          // restore previous state
+          setGroups(previous);
+        }
+    } catch (e) {
+      console.warn("deleteGroup error", e);
+      setGroups(previous);
+    }
   }
 
   function onOpenGroupChat(groupId: string) {
@@ -647,6 +745,8 @@ function AppShell() {
   function onStartMatchmakingDemo() {
     setIsDemoRunning(true);
     setDemoStatus("Searching for the best study partners...");
+    setSelectedMatchUserIds([]);
+    setDemoCandidates([]);
 
     window.setTimeout(() => {
       const candidates = filteredMatches.slice(0, 3);
@@ -661,21 +761,23 @@ function AppShell() {
   }
 
   async function onCreateDemoGroup() {
-    if (demoCandidates.length === 0) {
+    const selectedCandidates = demoCandidates.filter((candidate) => selectedMatchUserIds.includes(candidate.userId));
+
+    if (selectedCandidates.length === 0) {
       return;
     }
 
-    const candidateIds = demoCandidates.map((candidate) => candidate.userId);
-    const groupName = `Match Demo ${new Date().toLocaleTimeString()}`;
+    const candidateIds = selectedCandidates.map((candidate) => candidate.userId);
+    const name = groupName.trim() || "Study Group";
 
-    setSelectedMatchUserIds(candidateIds);
     setDemoStatus("Creating group from matching results...");
 
     const response = await createGroup({
-      name: groupName,
+      name,
       topic: matchInterest || "general",
       description: "Created from Matching view",
-      invitedUserIds: candidateIds
+      invitedUserIds: candidateIds,
+      invitedUsers: selectedCandidates.map((candidate) => ({ id: candidate.userId, username: candidate.username }))
     });
 
     setSelectedGroupId(response.group.id);
@@ -685,13 +787,68 @@ function AppShell() {
     setSelectedMatchUserIds([]);
   }
 
+  function onToggleMatchCandidateSelection(candidate: MatchCandidate) {
+    setSelectedMatchUserIds((current) =>
+      current.includes(candidate.userId)
+        ? current.filter((userId) => userId !== candidate.userId)
+        : [...current, candidate.userId]
+    );
+  }
+
+  function onSelectAllDemoCandidates() {
+    const candidateIds = demoCandidates.map((candidate) => candidate.userId);
+
+    setSelectedMatchUserIds((current) =>
+      current.length === candidateIds.length && candidateIds.every((candidateId) => current.includes(candidateId))
+        ? []
+        : candidateIds
+    );
+  }
+
+  async function onAcceptGroupInvite(inviteId: string) {
+    const invite = groupInvites.find((entry) => entry.id === inviteId);
+    if (!invite) {
+      return;
+    }
+
+    await joinGroup(invite.groupId);
+    await acceptGroupInvite(inviteId);
+    setGroupInvites((current) => current.map((entry) => (entry.id === inviteId ? { ...entry, status: "accepted" } : entry)));
+    await refreshCoreData();
+  }
+
+  async function onRejectGroupInvite(inviteId: string) {
+    await rejectGroupInvite(inviteId);
+    setGroupInvites((current) => current.map((entry) => (entry.id === inviteId ? { ...entry, status: "rejected" } : entry)));
+  }
+
   function onStartSession() {
-    const sessionId = `session_${Date.now()}`;
-    setTrackerSessionId(sessionId);
+    (async () => {
+      try {
+        const res = await startSession(selectedGroupId || undefined);
+        if (res?.session?.id) {
+          setTrackerSessionId(res.session.id);
+          setActiveSessionStartedAt(res.session.startedAt || new Date().toISOString());
+        }
+      } catch (e) {
+        console.warn("Failed to start session", e);
+      }
+    })();
   }
 
   function onEndSession() {
-    setTrackerSessionId("");
+    (async () => {
+      try {
+        if (!trackerSessionId) return;
+        const res = await endSession(trackerSessionId);
+        console.log("Session ended:", res);
+        setTrackerSessionId("");
+        setActiveSessionStartedAt("");
+        await refreshCoreData();
+      } catch (e) {
+        console.warn("Failed to end session", e);
+      }
+    })();
   }
 
   const headerSubtitle =
@@ -707,7 +864,7 @@ function AppShell() {
         : activeView === "groups"
           ? [`${groups.length} groups`, selectedGroupId ? `Active ${selectedGroupId}` : "No active group"]
           : activeView === "friends"
-            ? [`${friends.length} friends`, `${friendRequests.filter(r => r.status === "pending").length} pending`]
+              ? [`${friends.length} friends`, `${friendRequests.filter((r) => r.status === "pending").length} pending`, `${groupInvites.filter((invite) => invite.status === "pending").length} invites`]
             : activeView === "tracker"
               ? [trackerSessionId ? "Session Active" : "No Session"]
               : activeView === "chat"
@@ -756,10 +913,11 @@ function AppShell() {
                 hoursProgress={hoursProgress}
                 studyHours={studyHours}
                 interestChart={interestChart}
-                interestInput={interestInput}
+                interestOptions={availableInterests}
+                selectedInterestTopics={selectedInterestTopics}
                 universityInput={universityInput}
                 departmentInput={departmentInput}
-                onInterestInputChange={setInterestInput}
+                onToggleInterestTopic={onToggleInterestTopic}
                 onUniversityInputChange={setUniversityInput}
                 onDepartmentInputChange={setDepartmentInput}
                 onSaveProfile={onSaveProfile}
@@ -771,25 +929,33 @@ function AppShell() {
             <MatchingView
               matchInterest={matchInterest}
               availableInterests={matchingInterests}
+              groupName={groupName}
               demoCandidates={demoCandidates}
+              selectedMatchUserIds={selectedMatchUserIds}
               isDemoRunning={isDemoRunning}
               demoStatus={demoStatus}
               onMatchInterestChange={setMatchInterest}
+              onGroupNameChange={setGroupName}
               onStartMatchmakingDemo={onStartMatchmakingDemo}
               onCreateDemoGroup={onCreateDemoGroup}
+              onSelectAllDemoCandidates={onSelectAllDemoCandidates}
+              onToggleMatchCandidateSelection={onToggleMatchCandidateSelection}
             />
           ) : activeView === "groups" ? (
             <GroupsView
-              groupName={groupName}
-              groupTopic={groupTopic}
-              groupDescription={groupDescription}
-              groups={groups}
-              onGroupNameChange={setGroupName}
-              onGroupTopicChange={setGroupTopic}
-              onGroupDescriptionChange={setGroupDescription}
-              onCreateGroup={onCreateGroup}
+              groupSearchName={groupSearchName}
+              groupSearchInterest={groupSearchInterest}
+              groupInterestOptions={groupInterestOptions}
+              groups={filteredGroups}
+              groupInvites={groupInvites}
+              onGroupSearchNameChange={setGroupSearchName}
+              onGroupSearchInterestChange={setGroupSearchInterest}
               onJoinGroup={onJoinGroup}
               onOpenGroupChat={onOpenGroupChat}
+              onAcceptGroupInvite={onAcceptGroupInvite}
+              onRejectGroupInvite={onRejectGroupInvite}
+              currentUserId={user?.id}
+              onDeleteGroup={onDeleteGroup}
             />
           ) : activeView === "notes" ? (
             <NotesView
@@ -800,9 +966,6 @@ function AppShell() {
               onDeleteNote={onDeleteNote}
               onApproveRequest={onApproveAccessRequest}
               onRejectRequest={onRejectAccessRequest}
-              friendRequests={friendRequests}
-              onAcceptFriendRequest={onAcceptFriendRequest}
-              onRejectFriendRequest={onRejectFriendRequest}
               accessRequests={accessRequests}
             />
           ) : activeView === "friends" ? (
@@ -810,7 +973,7 @@ function AppShell() {
               friends={friends}
               friendRequests={friendRequests}
               currentUserId={user?.id || ""}
-                currentUsername={user?.username}
+              currentUsername={user?.username}
               onAcceptFriendRequest={onAcceptFriendRequest}
               onRejectFriendRequest={onRejectFriendRequest}
               onSendFriendRequest={onSendFriendRequest}
@@ -838,6 +1001,7 @@ function AppShell() {
               xpProgress={xpProgress}
               hoursProgress={hoursProgress}
               activeSessionId={trackerSessionId}
+              sessionTimerLabel={sessionTimerLabel}
               onStartSession={onStartSession}
               onEndSession={onEndSession}
             />

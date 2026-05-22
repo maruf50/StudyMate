@@ -2,21 +2,26 @@
   --text: #6b6375;
   --text-h: #08060d;
   --bg: #fff;
-  --border: #e5e4e7;
+  --surface: #fbfbff;
+  --border: #e9e7ef;
   --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
+  --accent: #6f3cff;
+  --accent-600: #7b4dff;
+  --accent-400: #a483ff;
+  --accent-bg: rgba(111, 60, 255, 0.08);
+  --accent-border: rgba(111, 60, 255, 0.18);
   --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  --radius: 12px;
+  --shadow-lg: rgba(31, 33, 57, 0.12) 0 20px 40px -12px, rgba(31,33,57,0.06) 0 6px 12px -4px;
+  --shadow-md: rgba(31, 33, 57, 0.08) 0 12px 28px -8px, rgba(31,33,57,0.04) 0 4px 8px -2px;
+  --shadow-sm: rgba(31, 33, 57, 0.06) 0 6px 12px -6px;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --sans: Inter, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --heading: Sora, Inter, system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
+  font: 18px/150% var(--sans);
+  letter-spacing: 0.12px;
   color-scheme: light dark;
   color: var(--text);
   background: var(--bg);
@@ -109,3 +114,78 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/* New global UI primitives */
+.container {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: calc(var(--radius) - 2px);
+  border: 1px solid transparent;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 160ms cubic-bezier(.2,.9,.2,1), box-shadow 160ms;
+}
+
+.btn:active { transform: translateY(1px) }
+
+.btn-primary {
+  background: linear-gradient(90deg, var(--accent), var(--accent-400));
+  color: white;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-h);
+  border: 1px solid var(--border);
+}
+
+.input,
+input[type="text"],
+textarea,
+select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: calc(var(--radius) - 2px);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  transition: box-shadow 160ms, border-color 160ms;
+}
+
+.input:focus,
+input[type="text"]:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent-600);
+  box-shadow: 0 6px 20px rgba(111,60,255,0.08);
+}
+
+.card {
+  background: linear-gradient(180deg, #ffffff, #fbfaff);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  padding: 16px;
+}
+
+.glass {
+  background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(6px) saturate(120%);
+  border-radius: var(--radius);
+  border: 1px solid rgba(255,255,255,0.5);
+}
+
+.muted { color: var(--text); opacity: 0.76 }
+
+/* subtle motion */
+.animate-fade-up { animation: fade-up 420ms cubic-bezier(.2,.9,.2,1) both }
+@keyframes fade-up { from { opacity: 0; transform: translateY(6px) } to { opacity:1; transform:none } }

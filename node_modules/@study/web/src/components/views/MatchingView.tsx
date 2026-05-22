@@ -3,12 +3,17 @@ import type { MatchCandidate } from "../../types";
 type MatchingViewProps = {
   matchInterest: string;
   availableInterests: string[];
+  groupName: string;
   demoCandidates: MatchCandidate[];
+  selectedMatchUserIds: string[];
   isDemoRunning: boolean;
   demoStatus: string;
   onMatchInterestChange: (value: string) => void;
+  onGroupNameChange: (value: string) => void;
   onStartMatchmakingDemo: () => void;
   onCreateDemoGroup: () => void;
+  onSelectAllDemoCandidates: () => void;
+  onToggleMatchCandidateSelection: (candidate: MatchCandidate) => void;
 };
 
 export function MatchingView(props: MatchingViewProps) {
@@ -30,18 +35,38 @@ export function MatchingView(props: MatchingViewProps) {
             {props.isDemoRunning ? "Matchmaking..." : "Start Matchmaking"}
           </button>
         </div>
+        <div className="row" style={{ marginTop: 12 }}>
+          <input
+            value={props.groupName}
+            onChange={(e) => props.onGroupNameChange(e.target.value)}
+            placeholder="Group name"
+          />
+        </div>
         <div className="demo-box">
           <div className="row">
-            <button onClick={props.onCreateDemoGroup} disabled={props.demoCandidates.length === 0}>
-              Create Group From List
+            <button onClick={props.onCreateDemoGroup} disabled={props.selectedMatchUserIds.length === 0}>
+              Create Group With Selected
             </button>
+            <button onClick={props.onSelectAllDemoCandidates} disabled={props.demoCandidates.length === 0}>
+              Select All
+            </button>
+            <span>{props.selectedMatchUserIds.length} selected</span>
           </div>
           <p className="demo-status">{props.demoStatus}</p>
           {props.demoCandidates.length > 0 && (
             <ul className="demo-list">
               {props.demoCandidates.map((item) => (
                 <li key={item.userId}>
-                  {item.username} - score {item.score}
+                  <label className="match-candidate-row">
+                    <input
+                      type="checkbox"
+                      checked={props.selectedMatchUserIds.includes(item.userId)}
+                      onChange={() => props.onToggleMatchCandidateSelection(item)}
+                    />
+                    <span>
+                      {item.username} - score {item.score}
+                    </span>
+                  </label>
                 </li>
               ))}
             </ul>

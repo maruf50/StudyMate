@@ -11,7 +11,16 @@ export type User = {
   availability: Array<{ day: string; startHour: number; endHour: number }>;
 };
 
-type Group = { id: string; name: string; topic: string; description: string; memberIds: string[] };
+type Group = {
+  id: string;
+  name: string;
+  topic: string;
+  description: string;
+  memberIds: string[];
+  creatorId?: string;
+  creatorUsername?: string;
+};
+
 type BackendGroup = {
   id: string;
   name: string;
@@ -19,6 +28,21 @@ type BackendGroup = {
   description: string;
   memberIds?: string[];
   members?: Array<{ userId: string }>;
+  creatorId?: string;
+  creator?: { id?: string; username?: string };
+};
+
+type GroupInvite = {
+  id: string;
+  groupId: string;
+  groupName: string;
+  groupTopic: string;
+  inviterId: string;
+  inviterUsername: string;
+  inviteeId: string;
+  inviteeUsername: string;
+  status: "pending" | "accepted" | "rejected";
+  createdAt: string;
 };
 type NoteContent = { type: "text" | "image" | "link"; id: string; content: string; metadata?: string };
 type Note = { id: string; userId: string; ownerUsername: string; title: string; content: NoteContent[]; isPrivate: boolean; canEdit?: boolean; isFriendShared?: boolean; accessRequestCount?: number; updatedAt?: string };
@@ -39,10 +63,35 @@ const demoUser: User = {
 };
 
 type MockUserRecord = User & { password: string };
-
 const MOCK_USERS_STORAGE_KEY = "studygroupfinder.mockUsers";
 const AUTH_STORAGE_KEY = "studygroupfinder.session";
 const STORE_STORAGE_KEY_PREFIX = "studygroupfinder.store";
+const GROUP_INVITES_STORAGE_KEY = "studygroupfinder.groupInvites";
+const GLOBAL_REMOVED_GROUPS_KEY = "studygroupfinder.removedGroupIds.global";
+
+function loadGlobalRemovedGroupIds(): string[] {
+  try {
+    const raw = window.localStorage.getItem(GLOBAL_REMOVED_GROUPS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v) => typeof v === "string");
+  } catch {
+    return [];
+  }
+}
+
+function saveGlobalRemovedGroupId(id: string) {
+  try {
+    const current = loadGlobalRemovedGroupIds();
+    if (!current.includes(id)) {
+      current.push(id);
+      window.localStorage.setItem(GLOBAL_REMOVED_GROUPS_KEY, JSON.stringify(current));
+    }
+  } catch {
+    // ignore
+  }
+}
 
 function loadMockUsers(): MockUserRecord[] {
   try {
@@ -78,6 +127,100 @@ function saveMockUsers(users: MockUserRecord[]) {
   }
 }
 
+function awardXp(xp: number) {
+  if (xp <= 0) {
+    return;
+  }
+
+  store.stats.totalXp += xp;
+  store.user.totalXp = store.stats.totalXp;
+}
+
+function loadGroupInvites(): GroupInvite[] {
+  try {
+    const raw = window.localStorage.getItem(GROUP_INVITES_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((entry): entry is GroupInvite => {
+      return (
+        Boolean(entry) &&
+        typeof entry === "object" &&
+        typeof (entry as GroupInvite).id === "string" &&
+        typeof (entry as GroupInvite).groupId === "string" &&
+        typeof (entry as GroupInvite).inviteeId === "string" &&
+        typeof (entry as GroupInvite).status === "string"
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+function saveGroupInvites(invites: GroupInvite[]) {
+  try {
+    window.localStorage.setItem(GROUP_INVITES_STORAGE_KEY, JSON.stringify(invites));
+  } catch {
+    void invites;
+  }
+}
+
+function upsertGroupInvites(nextInvites: GroupInvite[]) {
+  const current = loadGroupInvites();
+  const updated = [...current];
+
+  for (const invite of nextInvites) {
+    const index = updated.findIndex((entry) => entry.id === invite.id);
+    if (index >= 0) {
+      updated[index] = invite;
+    } else {
+      updated.push(invite);
+    }
+  }
+
+  saveGroupInvites(updated);
+}
+
+function getCurrentInviteeId() {
+  return getStoredSessionUserId() || store.user.id;
+}
+
+function buildGroupInvites(group: Group, invitedUsers: Array<{ id: string; username: string }>): GroupInvite[] {
+  const uniqueInvites = invitedUsers.filter((invitee) => invitee.id && invitee.id !== store.user.id);
+
+  return uniqueInvites.map((invitee) => ({
+    id: `gi-${group.id}-${invitee.id}`,
+    groupId: group.id,
+    groupName: group.name,
+    groupTopic: group.topic,
+    inviterId: store.user.id,
+    inviterUsername: store.user.username,
+    inviteeId: invitee.id,
+    inviteeUsername: invitee.username,
+    status: "pending",
+    createdAt: new Date().toISOString()
+  }));
+}
+
+function updateGroupInviteStatus(inviteId: string, status: GroupInvite["status"]) {
+  const invites = loadGroupInvites();
+  const invite = invites.find((entry) => entry.id === inviteId);
+
+  if (!invite) {
+    return null;
+  }
+
+  invite.status = status;
+  saveGroupInvites(invites);
+  return invite;
+}
+
 function loadUserFromSessionStorage(): User | null {
   try {
     const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
@@ -105,13 +248,23 @@ const store = {
     { userId: "u3", username: "Charlie", interests: [{ topic: "math", level: "advanced" }] }
   ],
   groups: [
-    { id: "g1", name: "Algebra Team", topic: "math", description: "Evening practice", memberIds: ["user-demo"] }
+    {
+      id: "g1",
+      name: "Algebra Team",
+      topic: "math",
+      description: "Evening practice",
+      memberIds: ["user-demo"],
+      creatorId: "user-demo",
+      creatorUsername: "Demo Student"
+    }
   ] as Group[],
   notes: [] as Note[],
   accessRequests: [] as AccessRequest[],
   friendRequests: [] as FriendRequest[],
   stats: { totalXp: demoUser.totalXp, totalStudyMinutes: demoUser.totalStudyMinutes },
-  messages: { global: [] as Message[], groups: {} as Record<string, Message[]> }
+  messages: { global: [] as Message[], groups: {} as Record<string, Message[]> },
+  activeSessions: {} as Record<string, { id: string; groupId?: string | null; startedAt: string; startedBy: string }> ,
+  removedGroupIds: [] as string[]
 };
 
 function normalizeGroup(group: BackendGroup): Group {
@@ -120,7 +273,9 @@ function normalizeGroup(group: BackendGroup): Group {
     name: group.name,
     topic: group.topic,
     description: group.description,
-    memberIds: group.memberIds ?? group.members?.map((member) => member.userId) ?? []
+    memberIds: group.memberIds ?? group.members?.map((member) => member.userId) ?? [],
+    creatorId: group.creatorId ?? group.creator?.id,
+    creatorUsername: group.creator?.username
   };
 }
 
@@ -148,8 +303,10 @@ function loadStoreState() {
     if (Array.isArray(parsed.friendRequests)) store.friendRequests = parsed.friendRequests;
     if (Array.isArray(parsed.notes)) store.notes = parsed.notes;
     if (Array.isArray(parsed.groups)) store.groups = parsed.groups;
+    if (Array.isArray(parsed.removedGroupIds)) store.removedGroupIds = parsed.removedGroupIds;
     if (parsed.stats && typeof parsed.stats === "object") store.stats = parsed.stats;
     if (parsed.messages && typeof parsed.messages === "object") store.messages = parsed.messages;
+    if (parsed.activeSessions && typeof parsed.activeSessions === "object") store.activeSessions = parsed.activeSessions;
   } catch {
     // ignore
   }
@@ -161,8 +318,10 @@ function saveStoreState() {
       friendRequests: store.friendRequests,
       notes: store.notes,
       groups: store.groups,
+      removedGroupIds: store.removedGroupIds,
       stats: store.stats,
       messages: store.messages
+      , activeSessions: store.activeSessions
     };
     window.localStorage.setItem(getStoreStorageKey(), JSON.stringify(payload));
   } catch {
@@ -272,8 +431,7 @@ export async function login(payload: { email: string; password: string }) {
   saveStoreState();
 
   return delay({ token: "", user: store.user });
-}
-
+} 
 export async function getMe() {
   const res = await request("/api/auth/me");
   if (res?.user) return res;
@@ -312,25 +470,107 @@ export async function getMatches() {
 export async function getGroups() {
   const res = await request("/api/groups");
   if (res?.groups) {
-    return { groups: res.groups.map(normalizeGroup) };
+    const normalized = res.groups.map(normalizeGroup);
+    // filter out any groups the user has previously deleted locally when the
+    // backend record is owned by the server (so backend 404s don't reintroduce)
+    const globalRemoved = loadGlobalRemovedGroupIds();
+    const filtered = normalized.filter((group: Group) => !store.removedGroupIds.includes(group.id) && !globalRemoved.includes(group.id));
+    return { groups: filtered };
   }
-  return delay({ groups: store.groups });
+  // return local store groups, but filter removed ids as well (including global)
+  const globalRemoved = loadGlobalRemovedGroupIds();
+  return delay({ groups: store.groups.filter((g) => !store.removedGroupIds.includes(g.id) && !globalRemoved.includes(g.id)) });
 }
 
-export async function createGroup(payload: { name: string; topic: string; description: string; invitedUserIds?: string[] }) {
+export async function deleteGroup(groupId: string) {
+  const res = await request(`/api/groups/${groupId}`, { method: "DELETE" });
+  if (res) return res;
+  const groupIndex = store.groups.findIndex((g) => g.id === groupId);
+
+  // If the group isn't present in the mock store, assume the backend owns it
+  // and treat as a successful delete (avoids restoring the UI when backend
+  // returned 404 but frontend list came from the backend).
+  if (groupIndex === -1) {
+    // record the deletion locally so a later refresh doesn't reintroduce the group
+    if (!store.removedGroupIds.includes(groupId)) {
+      store.removedGroupIds.push(groupId);
+      saveStoreState();
+    }
+    // also persist as a global deletion so it disappears for other local users
+    try {
+      saveGlobalRemovedGroupId(groupId);
+    } catch {}
+    return delay({ ok: true, note: "not_in_mock" });
+  }
+
+  const group = store.groups[groupIndex];
+  // only creator can delete a group in the mock
+  const creatorId = (group as any).creatorId ?? (group as any).creator?.id ?? undefined;
+  if (creatorId && creatorId !== store.user.id) {
+    return delay({ ok: false, error: "forbidden" });
+  }
+
+  store.groups.splice(groupIndex, 1);
+  saveStoreState();
+  try {
+    // mark globally removed so other local accounts won't see it either
+    saveGlobalRemovedGroupId(groupId);
+  } catch {}
+  return delay({ ok: true });
+}
+
+export async function createGroup(payload: { name: string; topic: string; description: string; invitedUserIds?: string[]; invitedUsers?: Array<{ id: string; username: string }> }) {
   const res = await request("/api/groups", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
+  const invitedUsers = payload.invitedUsers ?? (payload.invitedUserIds || []).map((userId) => ({ id: userId, username: userId }));
   if (res?.group) {
+    if (invitedUsers.length > 0) {
+      upsertGroupInvites(buildGroupInvites(normalizeGroup(res.group), invitedUsers));
+    }
     return { group: normalizeGroup(res.group) };
   }
   const id = `g${Date.now()}`;
-  const group: Group = { id, name: payload.name, topic: payload.topic, description: payload.description, memberIds: [store.user.id, ...(payload.invitedUserIds || [])] };
+  const group: Group = {
+    id,
+    name: payload.name,
+    topic: payload.topic,
+    description: payload.description,
+    memberIds: [store.user.id],
+    creatorId: store.user.id,
+    creatorUsername: store.user.username
+  };
   store.groups.push(group);
+  if (invitedUsers.length > 0) {
+    upsertGroupInvites(buildGroupInvites(group, invitedUsers));
+  }
   saveStoreState();
   return delay({ group });
+}
+
+export async function listGroupInvites() {
+  const currentUserId = getCurrentInviteeId();
+  return delay({ invites: loadGroupInvites().filter((invite) => invite.inviteeId === currentUserId) });
+}
+
+export async function acceptGroupInvite(inviteId: string) {
+  const invite = updateGroupInviteStatus(inviteId, "accepted");
+  if (!invite) {
+    return delay({ invite: null });
+  }
+
+  return delay({ invite });
+}
+
+export async function rejectGroupInvite(inviteId: string) {
+  const invite = updateGroupInviteStatus(inviteId, "rejected");
+  if (!invite) {
+    return delay({ invite: null });
+  }
+
+  return delay({ invite });
 }
 
 export async function joinGroup(groupId: string) {
@@ -349,19 +589,46 @@ export async function startSession(groupId?: string) {
     body: JSON.stringify({ groupId })
   });
   if (res?.session) return res;
-  const session = { id: `s${Date.now()}`, groupId: groupId || null };
+
+  const id = `s${Date.now()}`;
+  const session = { id, groupId: groupId || null, startedAt: new Date().toISOString(), startedBy: store.user.id };
+  store.activeSessions[session.id] = session;
+  saveStoreState();
   return delay({ session });
 }
 
 export async function endSession(sessionId: string) {
   const res = await request(`/api/study-sessions/${sessionId}/end`, { method: "POST" });
   if (res?.totals) return res;
-  store.stats.totalStudyMinutes += 25;
-  store.stats.totalXp += 10;
+  const session = store.activeSessions[sessionId];
+  if (!session) {
+    // fallback: add a small fixed amount
+    store.stats.totalStudyMinutes += 25;
+    const xp = 10;
+    store.stats.totalXp += xp;
+    store.user.totalStudyMinutes = store.stats.totalStudyMinutes;
+    store.user.totalXp = store.stats.totalXp;
+    saveStoreState();
+    return delay({ totals: store.stats, minutes: 25, xp });
+  }
+
+  const started = Date.parse(session.startedAt);
+  const now = Date.now();
+  const minutes = Math.max(1, Math.round((now - started) / 60000));
+
+  // award XP: 5 XP per 10 minutes studied (rounded down), minimum 2 XP
+  const xp = Math.max(2, Math.floor(minutes / 10) * 5);
+
+  store.stats.totalStudyMinutes += minutes;
+  store.stats.totalXp += xp;
   store.user.totalStudyMinutes = store.stats.totalStudyMinutes;
   store.user.totalXp = store.stats.totalXp;
+
+  // remove active session
+  delete store.activeSessions[sessionId];
   saveStoreState();
-  return delay({ totals: store.stats });
+
+  return delay({ totals: store.stats, minutes, xp });
 }
 
 export async function getStats() {
@@ -441,6 +708,12 @@ export async function createNote(payload: { title: string; content: NoteContent[
   if (res?.note) return res;
   const note = { id: `n${Date.now()}`, userId: store.user.id, ownerUsername: store.user.username, title: payload.title, content: payload.content || [], updatedAt: new Date().toISOString(), isPrivate: payload.isPrivate ?? false, canEdit: true, accessRequestCount: 0 };
   store.notes.push(note);
+
+  // award XP for sharing public notes
+  if (!note.isPrivate) {
+    awardXp(20);
+  }
+
   saveStoreState();
   return delay({ note });
 }
@@ -450,7 +723,11 @@ export async function updateNotePrivacy(noteId: string, isPrivate: boolean) {
   if (res?.note) return res;
   const note = store.notes.find((n) => n.id === noteId && n.userId === store.user.id);
   if (note) {
+    const wasPrivate = note.isPrivate;
     note.isPrivate = isPrivate;
+    if (wasPrivate && !isPrivate) {
+      awardXp(20);
+    }
     saveStoreState();
   }
   return delay({ note });
@@ -523,6 +800,9 @@ export async function sendGlobalMessage(content: string) {
     createdAt: new Date().toISOString()
   };
   store.messages.global.push(message);
+
+  awardXp(content.length > 80 ? 2 : 1);
+
   saveStoreState();
   return delay({ message });
 }
@@ -549,6 +829,16 @@ export async function sendGroupMessage(groupId: string, content: string) {
     createdAt: new Date().toISOString()
   };
   store.messages.groups[groupId] = [...(store.messages.groups[groupId] || []), message];
+
+  // award XP for active participation in group chat
+  try {
+    const xpForMessage = content.length > 80 ? 2 : 1;
+    store.stats.totalXp += xpForMessage;
+    store.user.totalXp = store.stats.totalXp;
+  } catch {
+    // ignore
+  }
+
   saveStoreState();
   return delay({ message });
 }

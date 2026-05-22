@@ -11,10 +11,11 @@ type DashboardViewProps = {
   hoursProgress: number;
   studyHours: number;
   interestChart: { background: string; segments: InterestSegment[] };
-  interestInput: string;
+  interestOptions: string[];
+  selectedInterestTopics: string[];
   universityInput: string;
   departmentInput: string;
-  onInterestInputChange: (value: string) => void;
+  onToggleInterestTopic: (topic: string) => void;
   onUniversityInputChange: (value: string) => void;
   onDepartmentInputChange: (value: string) => void;
   onSaveProfile: () => void;
@@ -70,12 +71,7 @@ export function DashboardView(props: DashboardViewProps) {
               <p className="subtitle">{props.user?.email}</p>
             </div>
           </div>
-          {!isProfileComplete && (
-            <div className="completion-badge">
-              <span className="badge-icon">⚠️</span>
-              <span>Complete your profile to improve matching</span>
-            </div>
-          )}
+          {/* profile completion prompt removed per request */}
         </div>
       </section>
 
@@ -111,57 +107,51 @@ export function DashboardView(props: DashboardViewProps) {
         </div>
       </section>
 
-      {/* Profile Setup Section */}
-      <section className="panel">
-        <h2>📋 Profile Setup</h2>
-        <p className="section-subtitle">Complete your profile to get better study group matches</p>
-        <div className="profile-form">
-          <div className="form-group">
-            <label>University</label>
-            <input
-              type="text"
-              placeholder="e.g., Stanford University"
-              value={props.universityInput}
-              onChange={(e) => props.onUniversityInputChange(e.target.value)}
-            />
+      {/* Profile setup removed */}
+
+      <section className="panel interest-panel">
+        <div className="interest-panel-header">
+          <div>
+            <h2>🎯 Interest Preferences</h2>
+            <p className="section-subtitle">
+              Select one or more topics so you and other students can find each other by what you study.
+            </p>
           </div>
-          <div className="form-group">
-            <label>Department / Major</label>
-            <input
-              type="text"
-              placeholder="e.g., Computer Science"
-              value={props.departmentInput}
-              onChange={(e) => props.onDepartmentInputChange(e.target.value)}
-            />
-          </div>
-          <div className="form-group">
-            <label>Add an Interest</label>
-            <div className="interest-input-row">
-              <input
-                type="text"
-                placeholder="e.g., data structures, calculus, biology"
-                value={props.interestInput}
-                onChange={(e) => props.onInterestInputChange(e.target.value)}
-              />
-            </div>
-          </div>
-          <button className="btn-primary save-button" onClick={props.onSaveProfile}>
-            💾 Save Profile Changes
-          </button>
+          <div className="interest-count-badge">{props.selectedInterestTopics.length} selected</div>
         </div>
-        {props.user?.interests && props.user.interests.length > 0 && (
-          <div className="interests-list">
-            <h4>Your Interests</h4>
+
+        <div className="interest-chip-grid" role="list" aria-label="Interest options">
+          {props.interestOptions.map((topic) => {
+            const isSelected = props.selectedInterestTopics.includes(topic);
+
+            return (
+              <button
+                key={topic}
+                type="button"
+                className={isSelected ? "interest-chip active" : "interest-chip"}
+                onClick={() => props.onToggleInterestTopic(topic)}
+                aria-pressed={isSelected}
+              >
+                {topic}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="interests-list">
+          <h4>Selected Interests</h4>
+          {props.selectedInterestTopics.length === 0 ? (
+            <p className="interest-empty-state">Choose a few interests to improve matching.</p>
+          ) : (
             <div className="interests-tags">
-              {props.user.interests.map((interest) => (
-                <span key={interest.topic} className={`interest-tag level-${interest.level}`}>
-                  {interest.topic}
-                  <small>{interest.level}</small>
+              {props.selectedInterestTopics.map((topic) => (
+                <span key={topic} className="interest-tag active">
+                  {topic}
                 </span>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </section>
 
       {/* Progress Section */}
