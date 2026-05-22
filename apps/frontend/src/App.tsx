@@ -193,6 +193,7 @@ function AppShell() {
   const [groupMessages, setGroupMessages] = useState<Message[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState("");
   const [activeSessionId, setActiveSessionId] = useState("");
+  const [activeSessionStartedAt, setActiveSessionStartedAt] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [groupChatInput, setGroupChatInput] = useState("");
   const [matchInterest, setMatchInterest] = useState("");
@@ -204,8 +205,8 @@ function AppShell() {
   const [trackerSessionId, setTrackerSessionId] = useState("");
   const [groups, setGroups] = useState<GroupSummary[]>([]);
   const [groupName, setGroupName] = useState("Study Group");
-  const [groupTopic, setGroupTopic] = useState("math");
-  const [groupDescription, setGroupDescription] = useState("Focused evening study session");
+  const [groupSearchName, setGroupSearchName] = useState("");
+  const [groupSearchInterest, setGroupSearchInterest] = useState("");
 
   const [selectedInterestTopics, setSelectedInterestTopics] = useState<string[]>([]);
   const [universityInput, setUniversityInput] = useState("");
@@ -424,9 +425,50 @@ function AppShell() {
   const matchingInterests = Array.from(
     new Set([...availableInterests, ...allMatches.flatMap((candidate) => candidate.interests?.map((entry) => entry.topic) || [])])
   );
+  const groupInterestOptions = Array.from(new Set([...availableInterests, ...groups.map((group) => group.studyTopic)]));
   const filteredMatches = filterMatchesByInterest(allMatches, matchInterest || selectedInterestTopics);
+  const filteredGroups = groups.filter((group) => {
+    const matchesName = groupSearchName.trim()
+      ? group.name.toLowerCase().includes(groupSearchName.trim().toLowerCase())
+      : true;
+    const matchesInterest = groupSearchInterest.trim()
+      ? group.studyTopic.trim().toLowerCase() === groupSearchInterest.trim().toLowerCase()
+      : true;
+
+    return matchesName && matchesInterest;
+  });
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) || null;
   const visibleGroupMessages = groupMessages.filter((message) => message.groupId === selectedGroupId);
+
+  const [sessionElapsedMs, setSessionElapsedMs] = useState(0);
+
+  useEffect(() => {
+    if (!activeSessionStartedAt || !trackerSessionId) {
+      setSessionElapsedMs(0);
+      return;
+    }
+
+    const updateElapsed = () => {
+      const startedAt = Date.parse(activeSessionStartedAt);
+      if (Number.isNaN(startedAt)) {
+        setSessionElapsedMs(0);
+        return;
+      }
+
+      setSessionElapsedMs(Math.max(0, Date.now() - startedAt));
+    };
+
+    updateElapsed();
+    const timerId = window.setInterval(updateElapsed, 1000);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [activeSessionStartedAt, trackerSessionId]);
+
+  const sessionTimerLabel = trackerSessionId
+    ? new Date(sessionElapsedMs).toISOString().slice(11, 19)
+    : "00:00:00";
 
   function onToggleInterestTopic(topic: string) {
     setSelectedInterestTopics((current) =>
@@ -547,6 +589,7 @@ function AppShell() {
     });
 
     setNotes((prev) => [...prev, response.note]);
+    await refreshCoreData();
   }
 
   async function onToggleNotePrivacy(noteId: string, isPrivate: boolean) {
@@ -556,6 +599,7 @@ function AppShell() {
         note.id === noteId ? { ...note, isPrivate } : note
       )
     );
+    await refreshCoreData();
   }
 
   async function onApproveAccessRequest(requestId: string) {
@@ -626,6 +670,7 @@ function AppShell() {
       setGlobalMessages((current) => [...current, response.message]);
     }
     setChatInput("");
+    await refreshCoreData();
   }
 
   async function onSendGroupChat() {
@@ -647,23 +692,6 @@ function AppShell() {
       setGroupMessages((current) => [...current, response.message]);
     }
     setGroupChatInput("");
-  }
-
-  async function onCreateGroup() {
-    const name = groupName.trim() || "Study Group";
-    const topic = groupTopic.trim() || "general";
-    const description = groupDescription.trim() || "Focused study session";
-
-    const response = await createGroup({
-      name,
-      topic,
-      description
-    });
-
-    setSelectedGroupId(response.group.id);
-    setGroupName("Study Group");
-    setGroupTopic("math");
-    setGroupDescription("Focused evening study session");
     await refreshCoreData();
   }
 
@@ -740,12 +768,12 @@ function AppShell() {
     }
 
     const candidateIds = selectedCandidates.map((candidate) => candidate.userId);
-    const groupName = `Match Demo ${new Date().toLocaleTimeString()}`;
+    const name = groupName.trim() || "Study Group";
 
     setDemoStatus("Creating group from matching results...");
 
     const response = await createGroup({
-      name: groupName,
+      name,
       topic: matchInterest || "general",
       description: "Created from Matching view",
       invitedUserIds: candidateIds,
@@ -800,6 +828,7 @@ function AppShell() {
         const res = await startSession(selectedGroupId || undefined);
         if (res?.session?.id) {
           setTrackerSessionId(res.session.id);
+          setActiveSessionStartedAt(res.session.startedAt || new Date().toISOString());
         }
       } catch (e) {
         console.warn("Failed to start session", e);
@@ -814,6 +843,7 @@ function AppShell() {
         const res = await endSession(trackerSessionId);
         console.log("Session ended:", res);
         setTrackerSessionId("");
+        setActiveSessionStartedAt("");
         await refreshCoreData();
       } catch (e) {
         console.warn("Failed to end session", e);
@@ -899,11 +929,13 @@ function AppShell() {
             <MatchingView
               matchInterest={matchInterest}
               availableInterests={matchingInterests}
+              groupName={groupName}
               demoCandidates={demoCandidates}
               selectedMatchUserIds={selectedMatchUserIds}
               isDemoRunning={isDemoRunning}
               demoStatus={demoStatus}
               onMatchInterestChange={setMatchInterest}
+              onGroupNameChange={setGroupName}
               onStartMatchmakingDemo={onStartMatchmakingDemo}
               onCreateDemoGroup={onCreateDemoGroup}
               onSelectAllDemoCandidates={onSelectAllDemoCandidates}
@@ -911,15 +943,13 @@ function AppShell() {
             />
           ) : activeView === "groups" ? (
             <GroupsView
-              groupName={groupName}
-              groupTopic={groupTopic}
-              groupDescription={groupDescription}
-              groups={groups}
+              groupSearchName={groupSearchName}
+              groupSearchInterest={groupSearchInterest}
+              groupInterestOptions={groupInterestOptions}
+              groups={filteredGroups}
               groupInvites={groupInvites}
-              onGroupNameChange={setGroupName}
-              onGroupTopicChange={setGroupTopic}
-              onGroupDescriptionChange={setGroupDescription}
-              onCreateGroup={onCreateGroup}
+              onGroupSearchNameChange={setGroupSearchName}
+              onGroupSearchInterestChange={setGroupSearchInterest}
               onJoinGroup={onJoinGroup}
               onOpenGroupChat={onOpenGroupChat}
               onAcceptGroupInvite={onAcceptGroupInvite}
@@ -936,9 +966,6 @@ function AppShell() {
               onDeleteNote={onDeleteNote}
               onApproveRequest={onApproveAccessRequest}
               onRejectRequest={onRejectAccessRequest}
-              friendRequests={friendRequests}
-              onAcceptFriendRequest={onAcceptFriendRequest}
-              onRejectFriendRequest={onRejectFriendRequest}
               accessRequests={accessRequests}
             />
           ) : activeView === "friends" ? (
@@ -974,6 +1001,7 @@ function AppShell() {
               xpProgress={xpProgress}
               hoursProgress={hoursProgress}
               activeSessionId={trackerSessionId}
+              sessionTimerLabel={sessionTimerLabel}
               onStartSession={onStartSession}
               onEndSession={onEndSession}
             />

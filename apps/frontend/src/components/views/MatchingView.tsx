@@ -3,11 +3,13 @@ import type { MatchCandidate } from "../../types";
 type MatchingViewProps = {
   matchInterest: string;
   availableInterests: string[];
+  groupName: string;
   demoCandidates: MatchCandidate[];
   selectedMatchUserIds: string[];
   isDemoRunning: boolean;
   demoStatus: string;
   onMatchInterestChange: (value: string) => void;
+  onGroupNameChange: (value: string) => void;
   onStartMatchmakingDemo: () => void;
   onCreateDemoGroup: () => void;
   onSelectAllDemoCandidates: () => void;
@@ -32,6 +34,13 @@ export function MatchingView(props: MatchingViewProps) {
           <button onClick={props.onStartMatchmakingDemo} disabled={props.isDemoRunning}>
             {props.isDemoRunning ? "Matchmaking..." : "Start Matchmaking"}
           </button>
+        </div>
+        <div className="row" style={{ marginTop: 12 }}>
+          <input
+            value={props.groupName}
+            onChange={(e) => props.onGroupNameChange(e.target.value)}
+            placeholder="Group name"
+          />
         </div>
         <div className="demo-box">
           <div className="row">

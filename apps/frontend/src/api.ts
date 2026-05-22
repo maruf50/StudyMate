@@ -127,6 +127,15 @@ function saveMockUsers(users: MockUserRecord[]) {
   }
 }
 
+function awardXp(xp: number) {
+  if (xp <= 0) {
+    return;
+  }
+
+  store.stats.totalXp += xp;
+  store.user.totalXp = store.stats.totalXp;
+}
+
 function loadGroupInvites(): GroupInvite[] {
   try {
     const raw = window.localStorage.getItem(GROUP_INVITES_STORAGE_KEY);
@@ -465,7 +474,7 @@ export async function getGroups() {
     // filter out any groups the user has previously deleted locally when the
     // backend record is owned by the server (so backend 404s don't reintroduce)
     const globalRemoved = loadGlobalRemovedGroupIds();
-    const filtered = normalized.filter((g) => !store.removedGroupIds.includes(g.id) && !globalRemoved.includes(g.id));
+    const filtered = normalized.filter((group: Group) => !store.removedGroupIds.includes(group.id) && !globalRemoved.includes(group.id));
     return { groups: filtered };
   }
   // return local store groups, but filter removed ids as well (including global)
@@ -702,9 +711,7 @@ export async function createNote(payload: { title: string; content: NoteContent[
 
   // award XP for sharing public notes
   if (!note.isPrivate) {
-    const xp = 20;
-    store.stats.totalXp += xp;
-    store.user.totalXp = store.stats.totalXp;
+    awardXp(20);
   }
 
   saveStoreState();
@@ -716,7 +723,11 @@ export async function updateNotePrivacy(noteId: string, isPrivate: boolean) {
   if (res?.note) return res;
   const note = store.notes.find((n) => n.id === noteId && n.userId === store.user.id);
   if (note) {
+    const wasPrivate = note.isPrivate;
     note.isPrivate = isPrivate;
+    if (wasPrivate && !isPrivate) {
+      awardXp(20);
+    }
     saveStoreState();
   }
   return delay({ note });
@@ -789,6 +800,9 @@ export async function sendGlobalMessage(content: string) {
     createdAt: new Date().toISOString()
   };
   store.messages.global.push(message);
+
+  awardXp(content.length > 80 ? 2 : 1);
+
   saveStoreState();
   return delay({ message });
 }

@@ -18,18 +18,6 @@ type AccessRequest = {
   createdAt: string;
 };
 
-type FriendRequest = {
-  id: string;
-  requesterId: string;
-  requesterUsername: string;
-  addresseeId: string;
-  addresseeUsername: string;
-  status: "pending" | "accepted" | "rejected";
-  createdAt: string;
-  isIncoming?: boolean;
-  isOutgoing?: boolean;
-};
-
 type NotesViewProps = {
   notes: (NoteSummary & { content?: NoteContent[] })[];
   currentUserId: string;
@@ -38,9 +26,6 @@ type NotesViewProps = {
   onDeleteNote?: (noteId: string) => void;
   onApproveRequest?: (requestId: string) => void;
   onRejectRequest?: (requestId: string) => void;
-  friendRequests?: FriendRequest[];
-  onAcceptFriendRequest?: (requestId: string) => void;
-  onRejectFriendRequest?: (requestId: string) => void;
   accessRequests?: AccessRequest[];
 };
 
@@ -50,8 +35,6 @@ export function NotesView(props: NotesViewProps) {
   const [expandedAccessRequests, setExpandedAccessRequests] = useState<string | null>(null);
 
   const selectedNote = selectedNoteId ? props.notes.find((n) => n.id === selectedNoteId) : null;
-  const incomingFriendRequests = (props.friendRequests || []).filter((request) => request.status === "pending" && request.isIncoming);
-  const outgoingFriendRequests = (props.friendRequests || []).filter((request) => request.status === "pending" && request.isOutgoing);
 
   const renderBlocks = (content?: NoteContent[]) => {
     if (!content || content.length === 0) {
@@ -129,42 +112,6 @@ export function NotesView(props: NotesViewProps) {
   return (
     <main className="view notes-view">
       <div className="notes-container">
-        {(incomingFriendRequests.length > 0 || outgoingFriendRequests.length > 0) && (
-          <section className="friend-requests-panel">
-            <h3>Friend Requests</h3>
-            {incomingFriendRequests.length > 0 && (
-              <div>
-                <h4>Incoming</h4>
-                <div className="requests-list">
-                  {incomingFriendRequests.map((request) => (
-                    <div key={request.id} className="request-item">
-                      <span className="requester-name">{request.requesterUsername}</span>
-                      <div className="request-actions">
-                        <button className="approve-btn" onClick={() => props.onAcceptFriendRequest?.(request.id)}>
-                          ✓
-                        </button>
-                        <button className="reject-btn" onClick={() => props.onRejectFriendRequest?.(request.id)}>
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {outgoingFriendRequests.length > 0 && (
-              <div>
-                <h4>Sent</h4>
-                <ul className="friend-request-summary-list">
-                  {outgoingFriendRequests.map((request) => (
-                    <li key={request.id}>{request.addresseeUsername} - {request.status}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </section>
-        )}
-
         <div className="notes-header">
           <h2>My Notes</h2>
           <button className="new-note-btn" onClick={() => setShowEditor(true)}>

@@ -1,17 +1,15 @@
 import { Check, X } from "lucide-react";
-import React, { useState } from "react";
+import { useState } from "react";
 import type { GroupInviteSummary, GroupSummary } from "../../types";
 
 type GroupsViewProps = {
-  groupName: string;
-  groupTopic: string;
-  groupDescription: string;
+  groupSearchName: string;
+  groupSearchInterest: string;
+  groupInterestOptions: string[];
   groups: GroupSummary[];
   groupInvites: GroupInviteSummary[];
-  onGroupNameChange: (value: string) => void;
-  onGroupTopicChange: (value: string) => void;
-  onGroupDescriptionChange: (value: string) => void;
-  onCreateGroup: () => void;
+  onGroupSearchNameChange: (value: string) => void;
+  onGroupSearchInterestChange: (value: string) => void;
   onJoinGroup: (groupId: string) => void;
   onOpenGroupChat: (groupId: string) => void;
   onAcceptGroupInvite: (inviteId: string) => Promise<void>;
@@ -63,11 +61,23 @@ export function GroupsView(props: GroupsViewProps) {
 
         <h2>Active Groups</h2>
         <div className="row">
-          <input value={props.groupName} onChange={(e) => props.onGroupNameChange(e.target.value)} />
-          <input value={props.groupTopic} onChange={(e) => props.onGroupTopicChange(e.target.value)} />
-          <button onClick={props.onCreateGroup}>Create</button>
+          <input
+            value={props.groupSearchName}
+            onChange={(e) => props.onGroupSearchNameChange(e.target.value)}
+            placeholder="Search by group name"
+          />
+          <select
+            value={props.groupSearchInterest}
+            onChange={(e) => props.onGroupSearchInterestChange(e.target.value)}
+          >
+            <option value="">All interests</option>
+            {props.groupInterestOptions.map((interest) => (
+              <option key={interest} value={interest}>
+                {interest}
+              </option>
+            ))}
+          </select>
         </div>
-        <input value={props.groupDescription} onChange={(e) => props.onGroupDescriptionChange(e.target.value)} />
         <ul>
           {props.groups.map((group) => (
             <li key={group.id} className="group-item group-card">
@@ -106,6 +116,7 @@ export function GroupsView(props: GroupsViewProps) {
             </li>
           ))}
         </ul>
+        {props.groups.length === 0 && <p className="status-text">No groups match your search.</p>}
 
         {confirmingGroupId && (
           <div className="confirm-modal">
