@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Send, Check, X } from "lucide-react";
-import type { FriendRequestSummary, GroupInviteSummary } from "../../types";
+import type { FriendRequestSummary } from "../../types";
 
 type FriendUser = {
   id: string;
@@ -11,14 +11,11 @@ type FriendUser = {
 type FriendsViewProps = {
   friends: FriendUser[];
   friendRequests: FriendRequestSummary[];
-  groupInvites: GroupInviteSummary[];
   currentUserId: string;
   currentUsername?: string;
   onAcceptFriendRequest: (requestId: string) => void;
   onRejectFriendRequest: (requestId: string) => void;
   onSendFriendRequest: (targetUserId: string) => Promise<void>;
-  onAcceptGroupInvite: (inviteId: string) => Promise<void>;
-  onRejectGroupInvite: (inviteId: string) => Promise<void>;
 };
 
 export function FriendsView(props: FriendsViewProps) {
@@ -44,12 +41,6 @@ export function FriendsView(props: FriendsViewProps) {
         req.requesterId === props.currentUserId ||
         (props.currentUsername ? req.requesterUsername === props.currentUsername : false)
       )
-  );
-
-  const incomingGroupInvites = props.groupInvites.filter(
-    (invite) =>
-      invite.status === "pending" &&
-      (invite.isIncoming === true || invite.inviteeId === props.currentUserId || (props.currentUsername ? invite.inviteeUsername === props.currentUsername : false))
   );
 
   async function handleAddFriend() {
@@ -125,34 +116,6 @@ export function FriendsView(props: FriendsViewProps) {
                     className="btn-secondary"
                     onClick={() => props.onRejectFriendRequest(request.id)}
                   >
-                    <X size={16} />
-                    Decline
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Incoming Study Group Invites */}
-      {incomingGroupInvites.length > 0 && (
-        <section className="friends-section">
-          <h3>Study Group Invites</h3>
-          <div className="requests-grid">
-            {incomingGroupInvites.map((invite) => (
-              <div key={invite.id} className="request-card incoming">
-                <div className="request-header">
-                  <strong className="username">{invite.groupName}</strong>
-                  <span className="badge">{invite.groupTopic}</span>
-                </div>
-                <p className="status-text">Invited by {invite.inviterUsername}</p>
-                <div className="request-actions">
-                  <button className="btn-primary" onClick={() => props.onAcceptGroupInvite(invite.id)}>
-                    <Check size={16} />
-                    Accept
-                  </button>
-                  <button className="btn-secondary" onClick={() => props.onRejectGroupInvite(invite.id)}>
                     <X size={16} />
                     Decline
                   </button>

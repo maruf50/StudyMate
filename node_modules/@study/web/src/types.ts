@@ -57,6 +57,7 @@ export type GroupSummary = {
   studyTopic: string;
   studyDescription: string;
   leaderName: string;
+  creatorId?: string;
   totalStudyMinutes: number;
   isActive: boolean;
   activeSessionCount: number;

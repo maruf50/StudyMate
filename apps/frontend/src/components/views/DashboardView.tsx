@@ -71,12 +71,7 @@ export function DashboardView(props: DashboardViewProps) {
               <p className="subtitle">{props.user?.email}</p>
             </div>
           </div>
-          {!isProfileComplete && (
-            <div className="completion-badge">
-              <span className="badge-icon">⚠️</span>
-              <span>Complete your profile to improve matching</span>
-            </div>
-          )}
+          {/* profile completion prompt removed per request */}
         </div>
       </section>
 
@@ -112,34 +107,7 @@ export function DashboardView(props: DashboardViewProps) {
         </div>
       </section>
 
-      {/* Profile Setup Section */}
-      <section className="panel">
-        <h2>📋 Profile Setup</h2>
-        <p className="section-subtitle">Complete your profile to get better study group matches</p>
-        <div className="profile-form">
-          <div className="form-group">
-            <label>University</label>
-            <input
-              type="text"
-              placeholder="e.g., Stanford University"
-              value={props.universityInput}
-              onChange={(e) => props.onUniversityInputChange(e.target.value)}
-            />
-          </div>
-          <div className="form-group">
-            <label>Department / Major</label>
-            <input
-              type="text"
-              placeholder="e.g., Computer Science"
-              value={props.departmentInput}
-              onChange={(e) => props.onDepartmentInputChange(e.target.value)}
-            />
-          </div>
-          <button className="btn-primary save-button" onClick={props.onSaveProfile}>
-            💾 Save Profile Changes
-          </button>
-        </div>
-      </section>
+      {/* Profile setup removed */}
 
       <section className="panel interest-panel">
         <div className="interest-panel-header">

@@ -27,6 +27,7 @@ import {
   listGroupMessages,
   sendGlobalMessage,
   sendGroupMessage
+  , startSession, endSession, deleteGroup
 } from "./api";
 import type { User } from "./api";
 import { AuthScreen, type AuthMode } from "./components/AuthScreen";
@@ -55,6 +56,9 @@ type ApiGroup = {
   description: string;
   memberIds?: string[];
   members?: Array<{ userId: string }>;
+  creatorId?: string;
+  creatorUsername?: string;
+  creator?: { id?: string; username?: string };
 };
 
 const AUTH_STORAGE_KEY = "studygroupfinder.session";
@@ -141,11 +145,12 @@ function mapGroupsToSummaries(groups: ApiGroup[], user: User | null, selectedGro
     return {
       id: group.id,
       name: group.name,
+      creatorId: group.creatorId ?? group.creator?.id,
       memberCount,
       maxMembers: 6,
       studyTopic: group.topic,
       studyDescription: group.description,
-      leaderName: user?.username || "Study Lead",
+      leaderName: group.creator?.username || group.creatorUsername || "Study Lead",
       totalStudyMinutes: memberCount * 45,
       isActive,
       activeSessionCount: isActive ? 1 : 0,
@@ -628,8 +633,13 @@ function AppShell() {
       return;
     }
 
-    if (!activeSessionId) {
-      setActiveSessionId(`s${Date.now()}`);
+    if (!trackerSessionId) {
+      try {
+        const s = await startSession(selectedGroupId);
+        if (s?.session?.id) setTrackerSessionId(s.session.id);
+      } catch (e) {
+        console.warn("failed to start session on first message", e);
+      }
     }
 
     const response = await sendGroupMessage(selectedGroupId, groupChatInput.trim());
@@ -661,6 +671,41 @@ function AppShell() {
     await joinGroup(groupId);
     setSelectedGroupId(groupId);
     await refreshCoreData();
+  }
+
+  async function onDeleteGroup(groupId: string) {
+    // optimistic UI: remove group locally first
+    console.log(
+      "onDeleteGroup called for",
+      groupId,
+      "current groups:",
+      groups.map((g) => ({ id: g.id, creatorId: (g as any).creatorId ?? (g as any).creator?.id }))
+    );
+    const previous = groups;
+    setGroups((current) => current.filter((g) => g.id !== groupId));
+
+    try {
+        const res = await deleteGroup(groupId);
+        console.log("deleteGroup response:", res);
+        if (res?.ok) {
+          // If the mock indicates the group wasn't present locally, the backend
+          // likely owns the record and returned a 404. In that case don't
+          // immediately re-fetch from the backend (which would re-introduce
+          // the group) — keep the optimistic removal.
+          if ((res as any).note === "not_in_mock") {
+            console.log("deleteGroup: removed locally; backend-not-found treated as success");
+          } else {
+            await refreshCoreData();
+          }
+        } else {
+          console.warn("deleteGroup failed", res);
+          // restore previous state
+          setGroups(previous);
+        }
+    } catch (e) {
+      console.warn("deleteGroup error", e);
+      setGroups(previous);
+    }
   }
 
   function onOpenGroupChat(groupId: string) {
@@ -750,12 +795,30 @@ function AppShell() {
   }
 
   function onStartSession() {
-    const sessionId = `session_${Date.now()}`;
-    setTrackerSessionId(sessionId);
+    (async () => {
+      try {
+        const res = await startSession(selectedGroupId || undefined);
+        if (res?.session?.id) {
+          setTrackerSessionId(res.session.id);
+        }
+      } catch (e) {
+        console.warn("Failed to start session", e);
+      }
+    })();
   }
 
   function onEndSession() {
-    setTrackerSessionId("");
+    (async () => {
+      try {
+        if (!trackerSessionId) return;
+        const res = await endSession(trackerSessionId);
+        console.log("Session ended:", res);
+        setTrackerSessionId("");
+        await refreshCoreData();
+      } catch (e) {
+        console.warn("Failed to end session", e);
+      }
+    })();
   }
 
   const headerSubtitle =
@@ -852,12 +915,17 @@ function AppShell() {
               groupTopic={groupTopic}
               groupDescription={groupDescription}
               groups={groups}
+              groupInvites={groupInvites}
               onGroupNameChange={setGroupName}
               onGroupTopicChange={setGroupTopic}
               onGroupDescriptionChange={setGroupDescription}
               onCreateGroup={onCreateGroup}
               onJoinGroup={onJoinGroup}
               onOpenGroupChat={onOpenGroupChat}
+              onAcceptGroupInvite={onAcceptGroupInvite}
+              onRejectGroupInvite={onRejectGroupInvite}
+              currentUserId={user?.id}
+              onDeleteGroup={onDeleteGroup}
             />
           ) : activeView === "notes" ? (
             <NotesView
@@ -877,14 +945,11 @@ function AppShell() {
             <FriendsView
               friends={friends}
               friendRequests={friendRequests}
-              groupInvites={groupInvites}
               currentUserId={user?.id || ""}
               currentUsername={user?.username}
               onAcceptFriendRequest={onAcceptFriendRequest}
               onRejectFriendRequest={onRejectFriendRequest}
               onSendFriendRequest={onSendFriendRequest}
-              onAcceptGroupInvite={onAcceptGroupInvite}
-              onRejectGroupInvite={onRejectGroupInvite}
             />
           ) : activeView === "chat" ? (
             <ChatView
