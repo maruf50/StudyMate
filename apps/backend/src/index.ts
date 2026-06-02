@@ -1,9 +1,10 @@
-import express, { Express, Request, Response } from "express";
+import express, { Express, NextFunction, Request, Response } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import bcrypt from "bcryptjs";
 
 dotenv.config();
 
@@ -17,6 +18,49 @@ if (!connectionString) {
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString })
 });
+
+type UserForResponse = {
+  id: string;
+  email: string;
+  username: string;
+  university: string | null;
+  department: string | null;
+  totalXp: number;
+  totalStudyMinutes: number;
+  profileImageUrl?: string | null;
+  bio?: string | null;
+  interests?: Array<{ topic: string; level: string }>;
+  availability?: Array<{ day: string; startHour: number; endHour: number }>;
+};
+
+function serializeUser(user: UserForResponse) {
+  return {
+    id: user.id,
+    email: user.email,
+    username: user.username,
+    university: user.university ?? "",
+    department: user.department ?? "",
+    totalXp: user.totalXp,
+    totalStudyMinutes: user.totalStudyMinutes,
+    profileImageUrl: user.profileImageUrl ?? undefined,
+    bio: user.bio ?? undefined,
+    interests: user.interests ?? [],
+    availability: user.availability ?? []
+  };
+}
+
+async function hashPassword(password: string) {
+  return bcrypt.hash(password, 10);
+}
+
+async function verifyPassword(inputPassword: string, storedPassword: string) {
+  if (storedPassword.startsWith("$2a$") || storedPassword.startsWith("$2b$") || storedPassword.startsWith("$2y$")) {
+    return bcrypt.compare(inputPassword, storedPassword);
+  }
+
+  // Supports old lab/demo rows that were saved before password hashing was added.
+  return inputPassword === storedPassword;
+}
 
 const requestContext = new AsyncLocalStorage<{ userId: string }>();
 
@@ -57,21 +101,6 @@ async function getAcceptedFriendIds(userId: string) {
   return new Set<string>(
     requests.map((request) => (request.requesterId === userId ? request.addresseeId : request.requesterId))
   );
-}
-
-async function awardXp(userId: string, xp: number) {
-  if (xp <= 0) {
-    return;
-  }
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      totalXp: {
-        increment: xp
-      }
-    }
-  });
 }
 
 function serializeFriendRequest(request: {
@@ -154,7 +183,20 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+function isPublicRoute(req: Request) {
+  return (
+    (req.method === "GET" && req.path === "/api/health") ||
+    (req.method === "POST" && req.path === "/api/auth/register") ||
+    (req.method === "POST" && req.path === "/api/auth/login")
+  );
+}
+
 app.use(async (req, _res, next) => {
+  if (isPublicRoute(req)) {
+    return next();
+  }
+
   try {
     const currentUserId = await getCurrentUserId(req);
     requestContext.run({ userId: currentUserId }, () => next());
@@ -174,40 +216,70 @@ app.get("/api/health", (req: Request, res: Response) => {
 // Register
 app.post("/api/auth/register", async (req: Request, res: Response) => {
   try {
-    const { email, username, password, university, department } = req.body;
+    const { email, username, password, university, department } = req.body as {
+      email?: string;
+      username?: string;
+      password?: string;
+      university?: string;
+      department?: string;
+    };
+
+    if (!email?.trim() || !username?.trim() || !password?.trim()) {
+      return res.status(400).json({ error: "Email, username, and password are required" });
+    }
+
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: email.trim().toLowerCase() },
+          { username: username.trim() }
+        ]
+      }
+    });
+
+    if (existingUser) {
+      return res.status(409).json({ error: "Email or username already exists" });
+    }
 
     const user = await prisma.user.create({
       data: {
-        email,
-        username,
-        password, // In production, hash this with bcryptjs
-        university,
-        department,
+        email: email.trim().toLowerCase(),
+        username: username.trim(),
+        password: await hashPassword(password),
+        university: university?.trim() || null,
+        department: department?.trim() || null
       },
+      include: { interests: true, availability: true }
     });
 
-    res.status(201).json({ user, token: "mock-token" });
+    return res.status(201).json({ user: serializeUser(user), token: user.id });
   } catch (error) {
-    res.status(400).json({ error: "Registration failed" });
+    console.error("Registration failed", error);
+    return res.status(400).json({ error: "Registration failed" });
   }
 });
 
 // Login
 app.post("/api/auth/login", async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body as { email?: string; password?: string };
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-    });
-
-    if (!user) {
-      return res.status(401).json({ error: "Invalid credentials" });
+    if (!email?.trim() || !password?.trim()) {
+      return res.status(400).json({ error: "Email and password are required" });
     }
 
-    void password;
-    return res.json({ user, token: "mock-token" });
+    const user = await prisma.user.findUnique({
+      where: { email: email.trim().toLowerCase() },
+      include: { interests: true, availability: true }
+    });
+
+    if (!user || !(await verifyPassword(password, user.password))) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    return res.json({ user: serializeUser(user), token: user.id });
   } catch (error) {
+    console.error("Login failed", error);
     return res.status(400).json({ error: "Login failed" });
   }
 });
@@ -226,9 +298,14 @@ app.get("/api/auth/me", async (req: Request, res: Response) => {
       },
     });
 
-    res.json({ user });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    return res.json({ user: serializeUser(user) });
   } catch (error) {
-    res.status(400).json({ error: "Failed to get user" });
+    console.error("Failed to get user", error);
+    return res.status(400).json({ error: "Failed to get user" });
   }
 });
 
@@ -559,8 +636,6 @@ app.post("/api/chat/global", async (req: Request, res: Response) => {
       include: { user: true }
     });
 
-
-    await awardXp(userId, content?.length > 80 ? 2 : 1);
     res.status(201).json({
       message: {
         id: created.id,
@@ -616,8 +691,6 @@ app.post("/api/chat/groups/:groupId", async (req: Request, res: Response) => {
       include: { user: true }
     });
 
-
-    await awardXp(userId, content?.length > 80 ? 2 : 1);
     res.status(201).json({
       message: {
         id: created.id,
@@ -682,25 +755,26 @@ app.post("/api/notes", async (req: Request, res: Response) => {
     const note = await prisma.note.create({
       data: {
         userId,
-        title,
-        isPrivate,
+        title: title?.trim() || "Untitled note",
+        isPrivate: Boolean(isPrivate),
         content: {
-          create: content.map((block: any, index: number) => ({
+          create: (content || []).map((block: any, index: number) => ({
             type: block.type,
             content: block.content,
             metadata: block.metadata,
-            order: index,
-          })),
-        },
+            order: index
+          }))
+        }
       },
-      include: { content: true },
+      include: {
+        content: true,
+        user: true,
+        accessRequests: true,
+        allowedUsers: true
+      }
     });
 
-    if (!isPrivate) {
-      await awardXp(userId, 20);
-    }
-
-    return res.status(201).json({ note });
+    return res.status(201).json({ note: serializeNote(note, userId, new Set<string>()) });
   } catch (error) {
     return res.status(400).json({ error: "Failed to create note" });
   }
@@ -709,25 +783,28 @@ app.post("/api/notes", async (req: Request, res: Response) => {
 // Update Note Privacy
 app.put("/api/notes/:noteId/privacy", async (req: Request, res: Response) => {
   try {
+    const userId = await getCurrentUserId();
     const { noteId } = req.params;
-    const { isPrivate } = req.body;
+    const { isPrivate } = req.body as { isPrivate?: boolean };
 
-    const existingNote = await prisma.note.findUnique({
-      where: { id: noteId },
-      select: { isPrivate: true, userId: true }
-    });
+    const existingNote = await prisma.note.findUnique({ where: { id: noteId } });
+
+    if (!existingNote) {
+      return res.status(404).json({ error: "Note not found" });
+    }
+
+    if (existingNote.userId !== userId) {
+      return res.status(403).json({ error: "Only the note owner can update privacy" });
+    }
 
     const note = await prisma.note.update({
       where: { id: noteId },
-      data: { isPrivate },
+      data: { isPrivate: Boolean(isPrivate) }
     });
-
-    if (existingNote?.isPrivate && !isPrivate) {
-      await awardXp(existingNote.userId, 20);
-    }
 
     return res.json({ note });
   } catch (error) {
+    console.error("Failed to update note privacy", error);
     return res.status(400).json({ error: "Failed to update note privacy" });
   }
 });
@@ -777,7 +854,18 @@ app.post("/api/notes/:noteId/request-access", async (req: Request, res: Response
 
 app.get("/api/notes/:noteId/access-requests", async (req: Request, res: Response) => {
   try {
+    const userId = await getCurrentUserId();
     const { noteId } = req.params;
+    const note = await prisma.note.findUnique({ where: { id: noteId } });
+
+    if (!note) {
+      return res.status(404).json({ error: "Note not found" });
+    }
+
+    if (note.userId !== userId) {
+      return res.status(403).json({ error: "Only the note owner can view access requests" });
+    }
+
     const requests = await prisma.noteAccessRequest.findMany({
       where: { noteId },
       include: { requester: true },
@@ -795,13 +883,14 @@ app.get("/api/notes/:noteId/access-requests", async (req: Request, res: Response
       }))
     });
   } catch (error) {
+    console.error("Failed to get access requests", error);
     return res.status(400).json({ error: "Failed to get access requests" });
   }
 });
 
 app.post("/api/notes/access-requests/:requestId/approve", async (req: Request, res: Response) => {
   try {
-    void req;
+    const userId = await getCurrentUserId();
     const { requestId } = req.params;
 
     const accessRequest = await prisma.noteAccessRequest.findUnique({
@@ -811,6 +900,10 @@ app.post("/api/notes/access-requests/:requestId/approve", async (req: Request, r
 
     if (!accessRequest) {
       return res.status(404).json({ error: "Request not found" });
+    }
+
+    if (accessRequest.note.userId !== userId) {
+      return res.status(403).json({ error: "Only the note owner can approve access" });
     }
 
     const updatedRequest = await prisma.noteAccessRequest.update({
@@ -840,8 +933,21 @@ app.post("/api/notes/access-requests/:requestId/approve", async (req: Request, r
 
 app.post("/api/notes/access-requests/:requestId/reject", async (req: Request, res: Response) => {
   try {
-    void req;
+    const userId = await getCurrentUserId();
     const { requestId } = req.params;
+
+    const accessRequest = await prisma.noteAccessRequest.findUnique({
+      where: { id: requestId },
+      include: { note: true }
+    });
+
+    if (!accessRequest) {
+      return res.status(404).json({ error: "Request not found" });
+    }
+
+    if (accessRequest.note.userId !== userId) {
+      return res.status(403).json({ error: "Only the note owner can reject access" });
+    }
 
     const updatedRequest = await prisma.noteAccessRequest.update({
       where: { id: requestId },
@@ -850,6 +956,7 @@ app.post("/api/notes/access-requests/:requestId/reject", async (req: Request, re
 
     return res.json({ request: updatedRequest });
   } catch (error) {
+    console.error("Failed to reject request", error);
     return res.status(400).json({ error: "Failed to reject request" });
   }
 });
@@ -874,17 +981,24 @@ app.get("/api/groups", async (req: Request, res: Response) => {
 app.post("/api/groups", async (req: Request, res: Response) => {
   try {
     const userId = await getCurrentUserId();
-    const { name, topic, description } = req.body;
+    const { name, topic, description, invitedUserIds } = req.body as {
+      name?: string;
+      topic?: string;
+      description?: string;
+      invitedUserIds?: string[];
+    };
+
+    const memberIds = Array.from(new Set([userId, ...((invitedUserIds || []).filter(Boolean))]));
 
     const group = await prisma.studyGroup.create({
       data: {
-        name,
-        topic,
-        description,
+        name: name?.trim() || "Study Group",
+        topic: topic?.trim() || "general",
+        description: description?.trim() || null,
         creatorId: userId,
         members: {
-          create: { userId },
-        },
+          create: memberIds.map((memberUserId) => ({ userId: memberUserId }))
+        }
       },
       include: { members: true, creator: true },
     });
@@ -901,14 +1015,161 @@ app.post("/api/groups/:groupId/join", async (req: Request, res: Response) => {
     const userId = await getCurrentUserId();
     const { groupId } = req.params;
 
-    await prisma.groupMember.create({
-      data: { groupId, userId },
+    await prisma.groupMember.upsert({
+      where: {
+        groupId_userId: { groupId, userId }
+      },
+      update: {},
+      create: { groupId, userId }
     });
 
     res.json({ ok: true });
   } catch (error) {
     res.status(400).json({ error: "Failed to join group" });
   }
+});
+
+// ===== STUDY SESSION ROUTES =====
+
+app.post("/api/study-sessions/start", async (req: Request, res: Response) => {
+  try {
+    const userId = await getCurrentUserId();
+    const { groupId } = req.body as { groupId?: string };
+    let targetGroupId = groupId?.trim() || "";
+
+    if (!targetGroupId) {
+      const existingPersonalGroup = await prisma.studyGroup.findFirst({
+        where: {
+          creatorId: userId,
+          name: "Personal Study Session",
+          topic: "personal"
+        }
+      });
+
+      if (existingPersonalGroup) {
+        targetGroupId = existingPersonalGroup.id;
+      } else {
+        const personalGroup = await prisma.studyGroup.create({
+          data: {
+            name: "Personal Study Session",
+            topic: "personal",
+            description: "Auto-created group for individual study tracker sessions",
+            creatorId: userId,
+            members: { create: { userId } }
+          }
+        });
+        targetGroupId = personalGroup.id;
+      }
+    }
+
+    await prisma.groupMember.upsert({
+      where: { groupId_userId: { groupId: targetGroupId, userId } },
+      update: {},
+      create: { groupId: targetGroupId, userId }
+    });
+
+    const session = await prisma.studySession.create({
+      data: {
+        groupId: targetGroupId,
+        startTime: new Date(),
+        participants: { create: { userId } }
+      }
+    });
+
+    return res.status(201).json({
+      session: {
+        id: session.id,
+        groupId: session.groupId,
+        startTime: session.startTime
+      }
+    });
+  } catch (error) {
+    console.error("Failed to start study session", error);
+    return res.status(400).json({ error: "Failed to start study session" });
+  }
+});
+
+app.post("/api/study-sessions/:sessionId/end", async (req: Request, res: Response) => {
+  try {
+    void req;
+    const userId = await getCurrentUserId();
+    const { sessionId } = req.params;
+
+    const session = await prisma.studySession.findUnique({
+      where: { id: sessionId }
+    });
+
+    if (!session) {
+      return res.status(404).json({ error: "Study session not found" });
+    }
+
+    if (session.endTime) {
+      const totals = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { totalStudyMinutes: true, totalXp: true }
+      });
+
+      return res.json({ totals: totals ?? { totalStudyMinutes: 0, totalXp: 0 } });
+    }
+
+    const endTime = new Date();
+    const durationMinutes = Math.max(1, Math.round((endTime.getTime() - session.startTime.getTime()) / 60000));
+    const xpEarned = Math.max(10, durationMinutes * 2);
+
+    await prisma.studySession.update({
+      where: { id: sessionId },
+      data: { endTime, durationMinutes }
+    });
+
+    await prisma.studySessionMember.upsert({
+      where: { sessionId_userId: { sessionId, userId } },
+      update: { minutesStudied: durationMinutes, xpEarned },
+      create: { sessionId, userId, minutesStudied: durationMinutes, xpEarned }
+    });
+
+    const totals = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        totalStudyMinutes: { increment: durationMinutes },
+        totalXp: { increment: xpEarned }
+      },
+      select: { totalStudyMinutes: true, totalXp: true }
+    });
+
+    return res.json({ totals });
+  } catch (error) {
+    console.error("Failed to end study session", error);
+    return res.status(400).json({ error: "Failed to end study session" });
+  }
+});
+
+app.get("/api/debug/database-summary", async (req: Request, res: Response) => {
+  try {
+    void req;
+    const userId = await getCurrentUserId();
+    const [users, groups, groupMembers, sessions, notes, messages, friendRequests] = await Promise.all([
+      prisma.user.count(),
+      prisma.studyGroup.count(),
+      prisma.groupMember.count(),
+      prisma.studySession.count(),
+      prisma.note.count(),
+      prisma.message.count(),
+      prisma.friendRequest.count()
+    ]);
+
+    return res.json({
+      currentUserId: userId,
+      counts: { users, groups, groupMembers, sessions, notes, messages, friendRequests }
+    });
+  } catch (error) {
+    console.error("Failed to read database summary", error);
+    return res.status(400).json({ error: "Failed to read database summary" });
+  }
+});
+
+app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
+  console.error("Unhandled API error", error);
+  return res.status(500).json({ error: error.message || "Internal server error" });
 });
 
 // ===== START SERVER =====
