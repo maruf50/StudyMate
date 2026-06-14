@@ -71,20 +71,16 @@ async function getCurrentUserId(req?: Request) {
     return contextUserId;
   }
 
-  const headerUserId = req?.header("x-user-id");
+  const headerUserId = req?.header("x-user-id")?.trim();
 
-  if (headerUserId) {
-    const user = await prisma.user.findUnique({ where: { id: headerUserId } });
-
-    if (user) {
-      return user.id;
-    }
+  if (!headerUserId) {
+    throw new Error("Authentication required");
   }
 
-  const user = await prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
+  const user = await prisma.user.findUnique({ where: { id: headerUserId } });
 
   if (!user) {
-    throw new Error("No demo user found in the database");
+    throw new Error("Invalid authenticated user");
   }
 
   return user.id;
@@ -123,7 +119,110 @@ function serializeFriendRequest(request: {
   };
 }
 
-function serializeNote(note: {
+function normalizeTopic(topic: unknown) {
+  if (typeof topic !== "string") {
+    return "";
+  }
+
+  return topic.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeLevel(level: unknown) {
+  return level === "beginner" || level === "advanced" || level === "intermediate" ? level : "intermediate";
+}
+
+function normalizeProfileInterests(interests: unknown) {
+  if (!Array.isArray(interests)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const normalized: Array<{ topic: string; level: string }> = [];
+
+  for (const item of interests) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const entry = item as { topic?: unknown; level?: unknown };
+    const topic = normalizeTopic(entry.topic);
+
+    if (!topic || seen.has(topic)) {
+      continue;
+    }
+
+    seen.add(topic);
+    normalized.push({ topic, level: normalizeLevel(entry.level) });
+  }
+
+  return normalized;
+}
+
+function normalizeAvailabilitySlots(availability: unknown) {
+  if (!Array.isArray(availability)) {
+    return [];
+  }
+
+  const validDays = new Set(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+  const seen = new Set<string>();
+  const normalized: Array<{ day: string; startHour: number; endHour: number }> = [];
+
+  for (const item of availability) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const slot = item as { day?: unknown; startHour?: unknown; endHour?: unknown };
+    const day = typeof slot.day === "string" ? slot.day.trim().toLowerCase() : "";
+    const startHour = Number(slot.startHour);
+    const endHour = Number(slot.endHour);
+
+    if (!validDays.has(day) || seen.has(day) || !Number.isInteger(startHour) || !Number.isInteger(endHour)) {
+      continue;
+    }
+
+    if (startHour < 0 || endHour > 24 || startHour >= endHour) {
+      continue;
+    }
+
+    seen.add(day);
+    normalized.push({ day, startHour, endHour });
+  }
+
+  return normalized;
+}
+
+function getFriendshipStatus(
+  relationship: { id: string; requesterId: string; addresseeId: string; status: string } | undefined,
+  currentUserId: string
+) {
+  if (!relationship || relationship.status === "rejected") {
+    return "none";
+  }
+
+  if (relationship.status === "accepted") {
+    return "friends";
+  }
+
+  if (relationship.status === "pending" && relationship.requesterId === currentUserId) {
+    return "pending_outgoing";
+  }
+
+  if (relationship.status === "pending" && relationship.addresseeId === currentUserId) {
+    return "pending_incoming";
+  }
+
+  return relationship.status;
+}
+
+type NoteBlockInput = {
+  id?: string;
+  type?: string;
+  content?: string;
+  metadata?: string | null;
+};
+
+type NoteWithRelations = {
   id: string;
   userId: string;
   title: string;
@@ -134,7 +233,34 @@ function serializeNote(note: {
   content: Array<{ id: string; type: string; content: string; metadata: string | null; order: number }>;
   accessRequests: Array<{ status: string }>;
   allowedUsers: Array<{ userId: string }>;
-}, currentUserId: string, friendIds: Set<string>) {
+};
+
+const noteInclude = {
+  content: true,
+  user: true,
+  accessRequests: true,
+  allowedUsers: true
+};
+
+function normalizeNoteContent(content: unknown): Array<{ type: string; content: string; metadata: string | null }> {
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  return content
+    .filter((block): block is NoteBlockInput => Boolean(block) && typeof block === "object")
+    .map((block) => {
+      const type = block.type === "image" || block.type === "link" ? block.type : "text";
+
+      return {
+        type,
+        content: typeof block.content === "string" ? block.content : "",
+        metadata: typeof block.metadata === "string" && block.metadata.trim() ? block.metadata.trim() : null
+      };
+    });
+}
+
+function serializeNote(note: NoteWithRelations, currentUserId: string, friendIds: Set<string>) {
   const isOwner = note.userId === currentUserId;
   const isFriend = friendIds.has(note.userId);
   const hasExplicitAccess = note.allowedUsers.some((access) => access.userId === currentUserId);
@@ -151,6 +277,8 @@ function serializeNote(note: {
     isPrivate: note.isPrivate,
     canEdit: isOwner,
     isFriendShared: isFriend && !isOwner,
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
     content: note.content
       .slice()
       .sort((left, right) => left.order - right.order)
@@ -165,14 +293,23 @@ function serializeNote(note: {
 }
 
 // Middleware
-const allowedOrigins = new Set([
-  process.env.CORS_ORIGIN || "http://localhost:5173",
-  "http://127.0.0.1:5173"
-]);
+const configuredOrigins = new Set(
+  (process.env.CORS_ORIGIN || "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
+
+function isAllowedDevOrigin(origin: string) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1):(\d+)$/.test(origin);
+}
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) {
+    // Allow REST clients, same-origin calls, configured production origins,
+    // and any local Vite development port. This prevents browser "Failed to fetch"
+    // errors when Vite moves from 5173 to 5174/5175 after a port is busy.
+    if (!origin || configuredOrigins.has(origin) || isAllowedDevOrigin(origin)) {
       callback(null, true);
       return;
     }
@@ -186,13 +323,14 @@ app.use(express.urlencoded({ extended: true }));
 
 function isPublicRoute(req: Request) {
   return (
+    (req.method === "GET" && req.path === "/") ||
     (req.method === "GET" && req.path === "/api/health") ||
     (req.method === "POST" && req.path === "/api/auth/register") ||
     (req.method === "POST" && req.path === "/api/auth/login")
   );
 }
 
-app.use(async (req, _res, next) => {
+app.use(async (req, res, next) => {
   if (isPublicRoute(req)) {
     return next();
   }
@@ -201,8 +339,18 @@ app.use(async (req, _res, next) => {
     const currentUserId = await getCurrentUserId(req);
     requestContext.run({ userId: currentUserId }, () => next());
   } catch (error) {
-    next(error);
+    return res.status(401).json({ error: "Please log in again before using this feature" });
   }
+});
+
+// Backend Home Route
+app.get("/", (req: Request, res: Response) => {
+  void req;
+  res.json({
+    status: "ok",
+    message: "StudyMate backend is running",
+    health: "/api/health"
+  });
 });
 
 // Health Check
@@ -328,46 +476,170 @@ app.get("/api/stats/me", async (req: Request, res: Response) => {
   }
 });
 
+app.get("/api/users/search", async (req: Request, res: Response) => {
+  try {
+    const currentUserId = await getCurrentUserId();
+    const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+
+    if (query.length < 2) {
+      return res.json({ users: [] });
+    }
+
+    const [users, friendRequests] = await Promise.all([
+      prisma.user.findMany({
+        where: {
+          id: { not: currentUserId },
+          OR: [
+            { username: { contains: query, mode: "insensitive" } },
+            { email: { contains: query, mode: "insensitive" } },
+            { university: { contains: query, mode: "insensitive" } },
+            { department: { contains: query, mode: "insensitive" } }
+          ]
+        },
+        include: { interests: true },
+        orderBy: { username: "asc" },
+        take: 10
+      }),
+      prisma.friendRequest.findMany({
+        where: {
+          OR: [{ requesterId: currentUserId }, { addresseeId: currentUserId }]
+        }
+      })
+    ]);
+
+    const relationshipByUserId = new Map<string, { id: string; requesterId: string; addresseeId: string; status: string }>();
+
+    for (const request of friendRequests) {
+      const otherUserId = request.requesterId === currentUserId ? request.addresseeId : request.requesterId;
+      relationshipByUserId.set(otherUserId, request);
+    }
+
+    return res.json({
+      users: users.map((user) => {
+        const relationship = relationshipByUserId.get(user.id);
+        const friendshipStatus = getFriendshipStatus(relationship, currentUserId);
+
+        return {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          university: user.university ?? "",
+          department: user.department ?? "",
+          friendshipStatus,
+          requestId: relationship?.status === "pending" ? relationship.id : undefined,
+          interests: user.interests.map((interest) => ({ topic: interest.topic, level: interest.level }))
+        };
+      })
+    });
+  } catch (error) {
+    console.error("Failed to search users", error);
+    return res.status(400).json({ error: "Failed to search users" });
+  }
+});
+
 app.get("/api/matches/users", async (req: Request, res: Response) => {
   try {
-    void req;
     const currentUserId = await getCurrentUserId();
+    const selectedInterest = typeof req.query.interest === "string" ? normalizeTopic(req.query.interest) : "";
 
-    const [currentUser, users] = await Promise.all([
+    const [currentUser, users, friendRequests] = await Promise.all([
       prisma.user.findUnique({
         where: { id: currentUserId },
         include: { interests: true }
       }),
       prisma.user.findMany({
         where: { id: { not: currentUserId } },
-        include: { interests: true }
+        include: { interests: true },
+        orderBy: { username: "asc" }
+      }),
+      prisma.friendRequest.findMany({
+        where: {
+          OR: [{ requesterId: currentUserId }, { addresseeId: currentUserId }]
+        }
       })
     ]);
 
-    const currentTopics = new Set((currentUser?.interests || []).map((interest) => interest.topic));
+    if (!currentUser) {
+      return res.status(404).json({ error: "Current user not found" });
+    }
 
-    const matches = users.map((candidate) => {
-      const overlap = candidate.interests.filter((interest) => currentTopics.has(interest.topic)).length;
-      const score = Math.max(50, 100 - candidate.interests.length * 5 + overlap * 15);
+    const currentTopics = new Set(currentUser.interests.map((interest) => normalizeTopic(interest.topic)));
+    const relationshipByUserId = new Map<string, { id: string; requesterId: string; addresseeId: string; status: string }>();
 
-      return {
-        userId: candidate.id,
-        username: candidate.username,
-        score,
-        interests: candidate.interests.map((interest) => ({ topic: interest.topic }))
-      };
-    });
+    for (const request of friendRequests) {
+      const otherUserId = request.requesterId === currentUserId ? request.addresseeId : request.requesterId;
+      relationshipByUserId.set(otherUserId, request);
+    }
 
-    res.json({ matches });
+    const matches = users
+      .filter((candidate) => {
+        if (!selectedInterest) {
+          return true;
+        }
+
+        return candidate.interests.some((interest) => normalizeTopic(interest.topic) === selectedInterest);
+      })
+      .map((candidate) => {
+        const candidateTopics = candidate.interests.map((interest) => normalizeTopic(interest.topic)).filter(Boolean);
+        const commonInterests = candidateTopics.filter((topic) => currentTopics.has(topic));
+        const friendshipStatus = getFriendshipStatus(relationshipByUserId.get(candidate.id), currentUserId);
+
+        let score = 40;
+        score += commonInterests.length * 25;
+        score += Math.min(candidateTopics.length, 4) * 4;
+
+        if (currentUser.university && candidate.university && currentUser.university === candidate.university) {
+          score += 10;
+        }
+
+        if (currentUser.department && candidate.department && currentUser.department === candidate.department) {
+          score += 10;
+        }
+
+        if (friendshipStatus === "friends") {
+          score += 8;
+        }
+
+        if (selectedInterest && candidateTopics.includes(selectedInterest)) {
+          score += 12;
+        }
+
+        if (currentTopics.size === 0 && candidateTopics.length > 0) {
+          score = Math.max(score, 55);
+        }
+
+        return {
+          userId: candidate.id,
+          username: candidate.username,
+          university: candidate.university ?? "",
+          department: candidate.department ?? "",
+          score: Math.min(100, Math.round(score)),
+          friendshipStatus,
+          commonInterests,
+          interests: candidate.interests.map((interest) => ({ topic: interest.topic, level: interest.level }))
+        };
+      })
+      .sort((left, right) => right.score - left.score || left.username.localeCompare(right.username));
+
+    return res.json({ matches });
   } catch (error) {
-    res.status(400).json({ error: "Failed to get matches" });
+    console.error("Failed to get matches", error);
+    return res.status(400).json({ error: "Failed to get matches" });
   }
 });
 
 app.put("/api/profile", async (req: Request, res: Response) => {
   try {
     const userId = await getCurrentUserId();
-    const { university, department, interests, availability } = req.body;
+    const { university, department, interests, availability } = req.body as {
+      university?: string;
+      department?: string;
+      interests?: unknown;
+      availability?: unknown;
+    };
+
+    const normalizedInterests = normalizeProfileInterests(interests);
+    const normalizedAvailability = normalizeAvailabilitySlots(availability);
 
     const updatedUser = await prisma.$transaction(async (tx) => {
       await tx.userInterest.deleteMany({ where: { userId } });
@@ -376,20 +648,13 @@ app.put("/api/profile", async (req: Request, res: Response) => {
       return tx.user.update({
         where: { id: userId },
         data: {
-          university,
-          department,
+          university: university?.trim() || null,
+          department: department?.trim() || null,
           interests: {
-            create: (interests || []).map((interest: { topic: string; level: string }) => ({
-              topic: interest.topic,
-              level: interest.level
-            }))
+            create: normalizedInterests
           },
           availability: {
-            create: (availability || []).map((slot: { day: string; startHour: number; endHour: number }) => ({
-              day: slot.day,
-              startHour: slot.startHour,
-              endHour: slot.endHour
-            }))
+            create: normalizedAvailability
           }
         },
         include: {
@@ -399,9 +664,10 @@ app.put("/api/profile", async (req: Request, res: Response) => {
       });
     });
 
-    res.json({ user: updatedUser });
+    return res.json({ user: serializeUser(updatedUser) });
   } catch (error) {
-    res.status(400).json({ error: "Failed to update profile" });
+    console.error("Failed to update profile", error);
+    return res.status(400).json({ error: "Failed to update profile" });
   }
 });
 
@@ -436,24 +702,29 @@ app.get("/api/friends/requests", async (req: Request, res: Response) => {
 app.post("/api/friends/requests", async (req: Request, res: Response) => {
   try {
     const requesterId = await getCurrentUserId();
-    const { targetUserId, targetUsername } = req.body;
+    const { targetUserId, targetUsername } = req.body as { targetUserId?: string; targetUsername?: string };
     const targetIdentifier = (targetUserId || targetUsername || "").trim();
 
-    if (!targetIdentifier || targetIdentifier === requesterId) {
-      return res.status(400).json({ error: "Invalid friend request target" });
+    if (!targetIdentifier) {
+      return res.status(400).json({ error: "Enter a valid username, email, or user ID" });
     }
 
     const targetUser = await prisma.user.findFirst({
       where: {
         OR: [
           { id: targetIdentifier },
-          { username: targetIdentifier }
+          { username: { equals: targetIdentifier, mode: "insensitive" } },
+          { email: { equals: targetIdentifier, mode: "insensitive" } }
         ]
       }
     });
 
     if (!targetUser) {
       return res.status(404).json({ error: "User not found" });
+    }
+
+    if (targetUser.id === requesterId) {
+      return res.status(400).json({ error: "You cannot send a friend request to yourself" });
     }
 
     const existing = await prisma.friendRequest.findFirst({
@@ -470,6 +741,10 @@ app.post("/api/friends/requests", async (req: Request, res: Response) => {
     });
 
     if (existing) {
+      if (existing.status === "accepted") {
+        return res.json({ request: serializeFriendRequest(existing), message: "Already friends" });
+      }
+
       if (existing.status === "pending" && existing.requesterId === targetUser.id && existing.addresseeId === requesterId) {
         const accepted = await prisma.friendRequest.update({
           where: { id: existing.id },
@@ -477,10 +752,27 @@ app.post("/api/friends/requests", async (req: Request, res: Response) => {
           include: { requester: true, addressee: true }
         });
 
-        return res.json({ request: serializeFriendRequest(accepted) });
+        return res.json({ request: serializeFriendRequest(accepted), message: "Existing incoming request accepted" });
       }
 
-      return res.json({ request: serializeFriendRequest(existing) });
+      if (existing.status === "pending") {
+        return res.json({ request: serializeFriendRequest(existing), message: "Friend request already pending" });
+      }
+
+      const renewed = await prisma.friendRequest.update({
+        where: { id: existing.id },
+        data: {
+          requesterId,
+          addresseeId: targetUser.id,
+          status: "pending"
+        },
+        include: {
+          requester: true,
+          addressee: true
+        }
+      });
+
+      return res.json({ request: serializeFriendRequest(renewed), message: "Friend request sent again" });
     }
 
     const request = await prisma.friendRequest.create({
@@ -495,8 +787,9 @@ app.post("/api/friends/requests", async (req: Request, res: Response) => {
       }
     });
 
-    return res.status(201).json({ request: serializeFriendRequest(request) });
+    return res.status(201).json({ request: serializeFriendRequest(request), message: "Friend request sent" });
   } catch (error) {
+    console.error("Failed to create friend request", error);
     return res.status(400).json({ error: "Failed to create friend request" });
   }
 });
@@ -581,18 +874,54 @@ app.get("/api/friends", async (req: Request, res: Response) => {
       orderBy: { createdAt: "desc" }
     });
 
-    const friends = requests.map((request) => {
-      const friendUser = request.requesterId === userId ? request.addressee : request.requester;
-      return {
-        id: friendUser.id,
-        username: friendUser.username,
-        userId: friendUser.id
-      };
-    });
+    const friendMap = new Map<string, { id: string; username: string; userId: string }>();
 
-    return res.json({ friends });
+    for (const request of requests) {
+      const friendUser = request.requesterId === userId ? request.addressee : request.requester;
+      if (!friendMap.has(friendUser.id)) {
+        friendMap.set(friendUser.id, {
+          id: friendUser.id,
+          username: friendUser.username,
+          userId: friendUser.id
+        });
+      }
+    }
+
+    return res.json({ friends: Array.from(friendMap.values()) });
   } catch (error) {
     return res.status(400).json({ error: "Failed to get friends" });
+  }
+});
+
+
+// Remove an accepted friend connection. This deletes the accepted friendship row between the current user and the selected friend.
+app.delete("/api/friends/:friendUserId", async (req: Request, res: Response) => {
+  try {
+    const userId = await getCurrentUserId();
+    const { friendUserId } = req.params;
+
+    if (!friendUserId || friendUserId === userId) {
+      return res.status(400).json({ error: "Invalid friend" });
+    }
+
+    const deleted = await prisma.friendRequest.deleteMany({
+      where: {
+        status: "accepted",
+        OR: [
+          { requesterId: userId, addresseeId: friendUserId },
+          { requesterId: friendUserId, addresseeId: userId }
+        ]
+      }
+    });
+
+    if (deleted.count === 0) {
+      return res.status(404).json({ error: "Friend connection not found" });
+    }
+
+    return res.json({ ok: true, friendUserId });
+  } catch (error) {
+    console.error("Failed to unfriend user", error);
+    return res.status(400).json({ error: "Failed to unfriend user" });
   }
 });
 
@@ -708,32 +1037,34 @@ app.post("/api/chat/groups/:groupId", async (req: Request, res: Response) => {
 
 // ===== NOTES ROUTES =====
 
-// Get User's Notes
+// Get all notes visible to the current user.
+// Visible notes are: own notes, public notes, notes shared by accepted friends, and notes with approved explicit access.
 app.get("/api/notes", async (req: Request, res: Response) => {
   try {
     void req;
     const userId = await getCurrentUserId();
     const friendIds = await getAcceptedFriendIds(userId);
 
+    const visibilityFilters: any[] = [
+      { userId },
+      { isPrivate: false },
+      {
+        allowedUsers: {
+          some: { userId }
+        }
+      }
+    ];
+
+    if (friendIds.size > 0) {
+      visibilityFilters.push({ userId: { in: Array.from(friendIds) } });
+    }
+
     const notes = await prisma.note.findMany({
       where: {
-        OR: [
-          { userId },
-          {
-            allowedUsers: {
-              some: {
-                userId
-              }
-            }
-          }
-        ]
+        OR: visibilityFilters
       },
-      include: {
-        content: true,
-        user: true,
-        accessRequests: true,
-        allowedUsers: true
-      },
+      include: noteInclude,
+      orderBy: { updatedAt: "desc" }
     });
 
     const visibleNotes = notes
@@ -742,6 +1073,7 @@ app.get("/api/notes", async (req: Request, res: Response) => {
 
     return res.json({ notes: visibleNotes });
   } catch (error) {
+    console.error("Failed to get notes", error);
     return res.status(400).json({ error: "Failed to get notes" });
   }
 });
@@ -750,7 +1082,12 @@ app.get("/api/notes", async (req: Request, res: Response) => {
 app.post("/api/notes", async (req: Request, res: Response) => {
   try {
     const userId = await getCurrentUserId();
-    const { title, isPrivate, content } = req.body;
+    const { title, isPrivate, content } = req.body as {
+      title?: string;
+      isPrivate?: boolean;
+      content?: unknown;
+    };
+    const normalizedContent = normalizeNoteContent(content);
 
     const note = await prisma.note.create({
       data: {
@@ -758,7 +1095,7 @@ app.post("/api/notes", async (req: Request, res: Response) => {
         title: title?.trim() || "Untitled note",
         isPrivate: Boolean(isPrivate),
         content: {
-          create: (content || []).map((block: any, index: number) => ({
+          create: normalizedContent.map((block, index) => ({
             type: block.type,
             content: block.content,
             metadata: block.metadata,
@@ -766,17 +1103,89 @@ app.post("/api/notes", async (req: Request, res: Response) => {
           }))
         }
       },
-      include: {
-        content: true,
-        user: true,
-        accessRequests: true,
-        allowedUsers: true
-      }
+      include: noteInclude
     });
 
     return res.status(201).json({ note: serializeNote(note, userId, new Set<string>()) });
   } catch (error) {
+    console.error("Failed to create note", error);
     return res.status(400).json({ error: "Failed to create note" });
+  }
+});
+
+// Update full Note: title, privacy, and content blocks.
+app.put("/api/notes/:noteId", async (req: Request, res: Response) => {
+  try {
+    const userId = await getCurrentUserId();
+    const { noteId } = req.params;
+    const { title, isPrivate, content } = req.body as {
+      title?: string;
+      isPrivate?: boolean;
+      content?: unknown;
+    };
+
+    const existingNote = await prisma.note.findUnique({ where: { id: noteId } });
+
+    if (!existingNote) {
+      return res.status(404).json({ error: "Note not found" });
+    }
+
+    if (existingNote.userId !== userId) {
+      return res.status(403).json({ error: "Only the note owner can edit this note" });
+    }
+
+    const normalizedContent = normalizeNoteContent(content);
+
+    const note = await prisma.$transaction(async (tx) => {
+      await tx.noteContent.deleteMany({ where: { noteId } });
+
+      return tx.note.update({
+        where: { id: noteId },
+        data: {
+          title: title?.trim() || "Untitled note",
+          isPrivate: Boolean(isPrivate),
+          content: {
+            create: normalizedContent.map((block, index) => ({
+              type: block.type,
+              content: block.content,
+              metadata: block.metadata,
+              order: index
+            }))
+          }
+        },
+        include: noteInclude
+      });
+    });
+
+    return res.json({ note: serializeNote(note, userId, new Set<string>()) });
+  } catch (error) {
+    console.error("Failed to update note", error);
+    return res.status(400).json({ error: "Failed to update note" });
+  }
+});
+
+// Delete Note
+app.delete("/api/notes/:noteId", async (req: Request, res: Response) => {
+  try {
+    const userId = await getCurrentUserId();
+    const { noteId } = req.params;
+
+    const existingNote = await prisma.note.findUnique({ where: { id: noteId } });
+
+    if (!existingNote) {
+      return res.status(404).json({ error: "Note not found" });
+    }
+
+    if (existingNote.userId !== userId) {
+      return res.status(403).json({ error: "Only the note owner can delete this note" });
+    }
+
+    await prisma.note.delete({ where: { id: noteId } });
+
+    return res.json({ ok: true, noteId });
+  } catch (error) {
+    console.error("Failed to delete note", error);
+    return res.status(400).json({ error: "Failed to delete note" });
   }
 });
 
@@ -799,10 +1208,11 @@ app.put("/api/notes/:noteId/privacy", async (req: Request, res: Response) => {
 
     const note = await prisma.note.update({
       where: { id: noteId },
-      data: { isPrivate: Boolean(isPrivate) }
+      data: { isPrivate: Boolean(isPrivate) },
+      include: noteInclude
     });
 
-    return res.json({ note });
+    return res.json({ note: serializeNote(note, userId, new Set<string>()) });
   } catch (error) {
     console.error("Failed to update note privacy", error);
     return res.status(400).json({ error: "Failed to update note privacy" });
@@ -848,6 +1258,7 @@ app.post("/api/notes/:noteId/request-access", async (req: Request, res: Response
 
     return res.status(201).json({ request });
   } catch (error) {
+    console.error("Failed to request access", error);
     return res.status(400).json({ error: "Failed to request access" });
   }
 });
@@ -927,6 +1338,7 @@ app.post("/api/notes/access-requests/:requestId/approve", async (req: Request, r
 
     return res.json({ request: updatedRequest });
   } catch (error) {
+    console.error("Failed to approve request", error);
     return res.status(400).json({ error: "Failed to approve request" });
   }
 });
@@ -1009,23 +1421,83 @@ app.post("/api/groups", async (req: Request, res: Response) => {
   }
 });
 
+// Delete Group. Only the creator can delete a group.
+app.delete("/api/groups/:groupId", async (req: Request, res: Response) => {
+  try {
+    const userId = await getCurrentUserId();
+    const { groupId } = req.params;
+
+    const group = await prisma.studyGroup.findUnique({ where: { id: groupId } });
+
+    if (!group) {
+      return res.status(404).json({ error: "Group not found" });
+    }
+
+    if (group.creatorId !== userId) {
+      return res.status(403).json({ error: "Only the group creator can delete this group" });
+    }
+
+    const sessions = await prisma.studySession.findMany({
+      where: { groupId },
+      select: { id: true }
+    });
+    const sessionIds = sessions.map((session) => session.id);
+
+    await prisma.$transaction(async (tx) => {
+      if (sessionIds.length > 0) {
+        await tx.studySessionMember.deleteMany({ where: { sessionId: { in: sessionIds } } });
+        await tx.studySession.deleteMany({ where: { id: { in: sessionIds } } });
+      }
+
+      await tx.message.deleteMany({ where: { groupId } });
+      await tx.groupMember.deleteMany({ where: { groupId } });
+      await tx.studyGroup.delete({ where: { id: groupId } });
+    });
+
+    return res.json({ ok: true, groupId });
+  } catch (error) {
+    console.error("Failed to delete group", error);
+    return res.status(400).json({ error: "Failed to delete group" });
+  }
+});
+
 // Join Group
 app.post("/api/groups/:groupId/join", async (req: Request, res: Response) => {
   try {
     const userId = await getCurrentUserId();
     const { groupId } = req.params;
 
-    await prisma.groupMember.upsert({
-      where: {
-        groupId_userId: { groupId, userId }
-      },
-      update: {},
-      create: { groupId, userId }
+    const group = await prisma.studyGroup.findUnique({
+      where: { id: groupId },
+      include: { members: true, creator: true }
     });
 
-    res.json({ ok: true });
+    if (!group) {
+      return res.status(404).json({ error: "Group not found" });
+    }
+
+    const alreadyMember = group.members.some((member) => member.userId === userId);
+
+    if (!alreadyMember && group.members.length >= group.maxMembers) {
+      return res.status(400).json({ error: "Group is already full" });
+    }
+
+    if (!alreadyMember) {
+      await prisma.groupMember.upsert({
+        where: { groupId_userId: { groupId, userId } },
+        update: {},
+        create: { groupId, userId }
+      });
+    }
+
+    const updatedGroup = await prisma.studyGroup.findUnique({
+      where: { id: groupId },
+      include: { members: true, creator: true }
+    });
+
+    return res.json({ ok: true, group: updatedGroup });
   } catch (error) {
-    res.status(400).json({ error: "Failed to join group" });
+    return res.status(400).json({ error: "Failed to join group" });
   }
 });
 
@@ -1080,7 +1552,8 @@ app.post("/api/study-sessions/start", async (req: Request, res: Response) => {
       session: {
         id: session.id,
         groupId: session.groupId,
-        startTime: session.startTime
+        startTime: session.startTime,
+        startedAt: session.startTime
       }
     });
   } catch (error) {
