@@ -55,7 +55,7 @@ npm run prisma:migrate:dev -w apps/backend
 # Enter migration name: init
 
 # Seed sample data (optional)
-npm run prisma:seed -w apps/backend
+npm run prisma:seed -w apps/backend 
 ```
 
 ### 5. Start Backend

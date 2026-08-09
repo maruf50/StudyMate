@@ -1,28 +1,28 @@
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --surface: #fbfbff;
-  --border: #e9e7ef;
-  --code-bg: #f4f3ec;
-  --accent: #6f3cff;
-  --accent-600: #7b4dff;
-  --accent-400: #a483ff;
-  --accent-bg: rgba(111, 60, 255, 0.08);
-  --accent-border: rgba(111, 60, 255, 0.18);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --radius: 12px;
-  --shadow-lg: rgba(31, 33, 57, 0.12) 0 20px 40px -12px, rgba(31,33,57,0.06) 0 6px 12px -4px;
-  --shadow-md: rgba(31, 33, 57, 0.08) 0 12px 28px -8px, rgba(31,33,57,0.04) 0 4px 8px -2px;
-  --shadow-sm: rgba(31, 33, 57, 0.06) 0 6px 12px -6px;
+  --text: #52525b;
+  --text-h: #09090b;
+  --bg: #ffffff;
+  --surface: #fafafa;
+  --border: #e4e4e7;
+  --code-bg: #f4f4f5;
+  --accent: #000000;
+  --accent-600: #18181b;
+  --accent-400: #27272a;
+  --accent-bg: rgba(0, 0, 0, 0.04);
+  --accent-border: rgba(0, 0, 0, 0.15);
+  --social-bg: #f4f4f5;
+  --radius: 8px;
+  --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
 
-  --sans: Inter, system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: Sora, Inter, system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --heading: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  font: 18px/150% var(--sans);
-  letter-spacing: 0.12px;
-  color-scheme: light dark;
+  font: 16px/150% var(--sans);
+  letter-spacing: -0.01em;
+  color-scheme: light;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -31,27 +31,7 @@
   -moz-osx-font-smoothing: grayscale;
 
   @media (max-width: 1024px) {
-    font-size: 16px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
+    font-size: 15px;
   }
 }
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Lock, Globe, X } from "lucide-react";
 import type { NoteSummary } from "../../types";
 
 type NoteContent = {
@@ -94,8 +95,8 @@ export function NoteEditor(props: NoteEditorProps) {
               checked={isPrivate}
               onChange={(e) => setIsPrivate(e.target.checked)}
             />
-            <span className={isPrivate ? "badge private" : "badge public"}>
-              {isPrivate ? "🔒 Private" : "🌐 Public"}
+            <span className={isPrivate ? "badge private" : "badge public"} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              {isPrivate ? <><Lock size={12} /> Private</> : <><Globe size={12} /> Public</>}
             </span>
           </label>
         </div>
@@ -115,7 +116,7 @@ export function NoteEditor(props: NoteEditorProps) {
                 onClick={() => handleDeleteBlock(block.id)}
                 title="Delete this block"
               >
-                ✕
+                <X size={14} />
               </button>
             </div>
 

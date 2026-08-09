@@ -873,10 +873,10 @@ function AppShell() {
 
   return (
     <div className="page">
+      <MainNav navItems={NAV_ITEMS} activeView={activeView} onNavigate={onNavigate} onLogout={onLogout} />
       <div className="app-shell">
-        <MainNav navItems={NAV_ITEMS} activeView={activeView} onNavigate={onNavigate} onLogout={onLogout} />
-
-        <section className="workspace">
+        <section className={`workspace${activeView === 'chat' ? ' workspace-chat' : ''}`}>
+          {activeView !== 'chat' && (
           <header className="topbar">
             <div>
               <h2>{VIEW_META[activeView].title}</h2>
@@ -890,6 +890,7 @@ function AppShell() {
               ))}
             </div>
           </header>
+          )}
 
           {activeView === "dashboard" ? (
             <>
@@ -988,6 +989,7 @@ function AppShell() {
               activeSessionId={activeSessionId}
               chatInput={chatInput}
               groupChatInput={groupChatInput}
+              currentUsername={user?.username}
               onChatInputChange={setChatInput}
               onGroupChatInputChange={setGroupChatInput}
               onSendGlobalChat={onSendGlobalChat}

@@ -6,7 +6,7 @@ export function buildInterestChart(user: User | null): {
   segments: InterestSegment[];
 } {
   const fallback = {
-    background: "conic-gradient(#d5e6f3 0deg 360deg)",
+    background: "conic-gradient(#e4e4e7 0deg 360deg)",
     segments: [] as InterestSegment[]
   };
 
@@ -22,7 +22,7 @@ export function buildInterestChart(user: User | null): {
     counts.set(topic, (counts.get(topic) || 0) + 1);
   }
 
-  const palette = ["#136f63", "#2a7bc0", "#db8f2e", "#7b5ccf", "#d65f5f", "#1a9ea0"];
+  const palette = ["#09090b", "#3f3f46", "#71717a", "#a1a1aa", "#d4d4d8", "#27272a"];
   const total = Array.from(counts.values()).reduce((sum, value) => sum + value, 0);
   let start = 0;
 

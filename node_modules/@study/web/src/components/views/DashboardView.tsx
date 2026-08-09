@@ -1,6 +1,15 @@
 import type { InterestSegment } from "../../types";
 import type { User } from "../../api";
-import { Star, Clock, Users, BookMarked } from "lucide-react";
+import {
+  Star,
+  Clock,
+  Users,
+  BookMarked,
+  Target,
+  BarChart2,
+  GraduationCap,
+  Sparkles,
+} from "lucide-react";
 
 type DashboardViewProps = {
   user: User | null;
@@ -24,26 +33,6 @@ type DashboardViewProps = {
 };
 
 export function DashboardView(props: DashboardViewProps) {
-  const isProfileComplete =
-    props.user?.university &&
-    props.user?.department &&
-    props.user?.interests &&
-    props.user.interests.length > 0 &&
-    props.user?.availability &&
-    props.user.availability.length > 0;
-
-  // Generate avatar color based on user ID
-  function getAvatarColor(userId?: string) {
-    if (!userId) return "hsl(280, 100%, 60%)";
-    let hash = 0;
-    for (let i = 0; i < userId.length; i++) {
-      hash = userId.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const hue = hash % 360;
-    return `hsl(${hue}, 75%, 55%)`;
-  }
-
-  // Get user initials
   function getUserInitials(username?: string) {
     if (!username) return "U";
     return username
@@ -54,81 +43,73 @@ export function DashboardView(props: DashboardViewProps) {
       .slice(0, 2);
   }
 
-  const avatarColor = getAvatarColor(props.user?.id);
   const initials = getUserInitials(props.user?.username);
 
   return (
-    <main className="view">
+    <main className="view dashboard-view">
       {/* Welcome Card */}
-      <section className="panel welcome-panel">
-        <div className="welcome-content">
-          <div className="welcome-header">
-            <div className="user-avatar" style={{ background: avatarColor }}>
-              {initials}
-            </div>
-            <div>
-              <h2>Welcome back, {props.user?.username}! 👋</h2>
-              <p className="subtitle">{props.user?.email}</p>
-            </div>
+      <div className="welcome-panel">
+        <div className="user-avatar large">{initials}</div>
+        <div className="welcome-text">
+          <div className="welcome-heading">
+            <h2>Welcome back, {props.user?.username}!</h2>
+            <Sparkles size={18} className="section-title-icon" />
           </div>
-          {/* profile completion prompt removed per request */}
+          <p className="subtitle">{props.user?.email}</p>
         </div>
-      </section>
+      </div>
 
       {/* Quick Stats */}
-      <section className="stats-grid">
+      <div className="stats-grid">
         <div className="stat-card">
-          <Star className="stat-icon" />
+          <div className="stat-icon-wrap"><Star size={18} /></div>
           <div className="stat-content">
             <small>Total XP</small>
             <strong>{props.user?.totalXp ?? 0}</strong>
           </div>
         </div>
         <div className="stat-card">
-          <Clock className="stat-icon" />
+          <div className="stat-icon-wrap"><Clock size={18} /></div>
           <div className="stat-content">
             <small>Study Hours</small>
             <strong>{props.studyHours}h</strong>
           </div>
         </div>
         <div className="stat-card">
-          <Users className="stat-icon" />
+          <div className="stat-icon-wrap"><Users size={18} /></div>
           <div className="stat-content">
             <small>Friends</small>
             <strong>{props.friends?.length ?? 0}</strong>
           </div>
         </div>
         <div className="stat-card">
-          <BookMarked className="stat-icon" />
+          <div className="stat-icon-wrap"><BookMarked size={18} /></div>
           <div className="stat-content">
             <small>Study Groups</small>
             <strong>{props.groups?.length ?? 0}</strong>
           </div>
         </div>
-      </section>
+      </div>
 
-      {/* Profile setup removed */}
-
-      <section className="panel interest-panel">
-        <div className="interest-panel-header">
-          <div>
-            <h2>🎯 Interest Preferences</h2>
-            <p className="section-subtitle">
-              Select one or more topics so you and other students can find each other by what you study.
-            </p>
-          </div>
-          <div className="interest-count-badge">{props.selectedInterestTopics.length} selected</div>
+      {/* Interest Preferences */}
+      <div className="view-section">
+        <div className="section-header">
+          <Target size={18} className="section-title-icon" />
+          <h3>Interest Preferences</h3>
+          <span className="count-badge">{props.selectedInterestTopics.length} selected</span>
         </div>
+        <p className="section-desc">
+          Select topics to improve study partner matching with other students.
+        </p>
 
         <div className="interest-chip-grid" role="list" aria-label="Interest options">
           {props.interestOptions.map((topic) => {
             const isSelected = props.selectedInterestTopics.includes(topic);
-
             return (
               <button
                 key={topic}
                 type="button"
-                className={isSelected ? "interest-chip active" : "interest-chip"}
+                className={`interest-chip ${isSelected ? "active" : ""}`}
                 onClick={() => props.onToggleInterestTopic(topic)}
                 aria-pressed={isSelected}
               >
@@ -138,55 +119,68 @@ export function DashboardView(props: DashboardViewProps) {
           })}
         </div>
 
-        <div className="interests-list">
-          <h4>Selected Interests</h4>
-          {props.selectedInterestTopics.length === 0 ? (
-            <p className="interest-empty-state">Choose a few interests to improve matching.</p>
-          ) : (
-            <div className="interests-tags">
-              {props.selectedInterestTopics.map((topic) => (
-                <span key={topic} className="interest-tag active">
-                  {topic}
-                </span>
-              ))}
+        {props.selectedInterestTopics.length > 0 && (
+          <div className="interests-tags">
+            {props.selectedInterestTopics.map((topic) => (
+              <span key={topic} className="interest-tag active">
+                {topic}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Progress */}
+      <div className="view-section">
+        <div className="section-header">
+          <BarChart2 size={18} className="section-title-icon" />
+          <h3>Progress Toward Goals</h3>
+        </div>
+
+        <div className="tracker-progress-stack">
+          <div className="metric-row">
+            <div className="metric-head">
+              <div className="metric-label-group">
+                <Star size={13} />
+                <strong>XP Progress</strong>
+              </div>
+              <span className="progress-text">
+                {props.user?.totalXp ?? 0} / {props.xpGoal} XP
+              </span>
             </div>
-          )}
-        </div>
-      </section>
+            <div className="progress-track" aria-label="XP progress">
+              <div className="progress-fill xp" style={{ width: `${props.xpProgress}%` }} />
+            </div>
+          </div>
 
-      {/* Progress Section */}
-      <section className="panel">
-        <h2>📊 Progress Toward Goals</h2>
-        <div className="metric-row">
-          <div className="metric-head">
-            <strong>XP Progress</strong>
-            <span className="progress-text">
-              {props.user?.totalXp ?? 0} / {props.xpGoal} XP
-            </span>
-          </div>
-          <div className="progress-track" aria-label="XP progress">
-            <div className="progress-fill xp" style={{ width: `${props.xpProgress}%` }} />
-          </div>
-        </div>
-        <div className="metric-row">
-          <div className="metric-head">
-            <strong>Study Hours</strong>
-            <span className="progress-text">
-              {props.studyHours} / {props.studyHoursGoal} hours
-            </span>
-          </div>
-          <div className="progress-track" aria-label="Study hour progress">
-            <div className="progress-fill hours" style={{ width: `${props.hoursProgress}%` }} />
+          <div className="metric-row">
+            <div className="metric-head">
+              <div className="metric-label-group">
+                <Clock size={13} />
+                <strong>Study Hours</strong>
+              </div>
+              <span className="progress-text">
+                {props.studyHours} / {props.studyHoursGoal} hours
+              </span>
+            </div>
+            <div className="progress-track" aria-label="Study hour progress">
+              <div className="progress-fill hours" style={{ width: `${props.hoursProgress}%` }} />
+            </div>
           </div>
         </div>
-      </section>
+      </div>
 
-      {/* Interest Distribution */}
+      {/* Interest Distribution Chart */}
       {props.interestChart.segments.length > 0 && (
-        <section className="panel">
-          <h2>🎯 Interest Distribution</h2>
+        <div className="view-section interest-chart-section">
+          <div className="section-header">
+            <h3>Interest Distribution</h3>
+          </div>
           <div className="interest-layout">
-            <div className="interest-pie" style={{ background: props.interestChart.background }} />
+            <div
+              className="interest-pie"
+              style={{ background: props.interestChart.background }}
+            />
             <ul className="interest-legend">
               {props.interestChart.segments.map((segment) => (
                 <li key={segment.topic}>
@@ -197,12 +191,15 @@ export function DashboardView(props: DashboardViewProps) {
               ))}
             </ul>
           </div>
-        </section>
+        </div>
       )}
 
       {/* Academic Info */}
-      <section className="panel">
-        <h2>🏫 Academic Information</h2>
+      <div className="view-section">
+        <div className="section-header">
+          <GraduationCap size={18} className="section-title-icon" />
+          <h3>Academic Information</h3>
+        </div>
         <div className="academic-grid">
           <div className="academic-card">
             <span className="label">University</span>
@@ -213,7 +210,7 @@ export function DashboardView(props: DashboardViewProps) {
             <span className="value">{props.user?.department || "Not set"}</span>
           </div>
         </div>
-      </section>
+      </div>
     </main>
   );
 }

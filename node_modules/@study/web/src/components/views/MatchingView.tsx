@@ -1,3 +1,4 @@
+import { Zap, Users, Plus, Search } from "lucide-react";
 import type { MatchCandidate } from "../../types";
 
 type MatchingViewProps = {
@@ -18,61 +19,128 @@ type MatchingViewProps = {
 
 export function MatchingView(props: MatchingViewProps) {
   return (
-    <main className="view">
-      <section className="panel">
-        <h2>Matchmaking Queue</h2>
-        <p>Pick an interest to find study partners and create a group.</p>
-        <div className="row">
-          <select value={props.matchInterest} onChange={(e) => props.onMatchInterestChange(e.target.value)}>
-            <option value="">All interests</option>
-            {props.availableInterests.map((interest) => (
-              <option key={interest} value={interest}>
-                {interest}
-              </option>
-            ))}
-          </select>
-          <button onClick={props.onStartMatchmakingDemo} disabled={props.isDemoRunning}>
-            {props.isDemoRunning ? "Matchmaking..." : "Start Matchmaking"}
-          </button>
-        </div>
-        <div className="row" style={{ marginTop: 12 }}>
-          <input
-            value={props.groupName}
-            onChange={(e) => props.onGroupNameChange(e.target.value)}
-            placeholder="Group name"
-          />
-        </div>
-        <div className="demo-box">
-          <div className="row">
-            <button onClick={props.onCreateDemoGroup} disabled={props.selectedMatchUserIds.length === 0}>
-              Create Group With Selected
-            </button>
-            <button onClick={props.onSelectAllDemoCandidates} disabled={props.demoCandidates.length === 0}>
-              Select All
-            </button>
-            <span>{props.selectedMatchUserIds.length} selected</span>
+    <main className="view matching-view">
+      <div className="matching-layout">
+        {/* Left: Controls */}
+        <aside className="matching-controls">
+          <div className="view-section">
+            <div className="section-header">
+              <Zap size={18} className="section-title-icon" />
+              <h3>Find Study Partners</h3>
+            </div>
+            <p className="section-desc">
+              Pick an interest topic to find compatible study partners and form a group.
+            </p>
+
+            <div className="matching-form-stack">
+              <div className="form-field">
+                <label className="field-label">Interest Topic</label>
+                <div className="select-wrap">
+                  <select
+                    value={props.matchInterest}
+                    onChange={(e) => props.onMatchInterestChange(e.target.value)}
+                  >
+                    <option value="">All interests</option>
+                    {props.availableInterests.map((interest) => (
+                      <option key={interest} value={interest}>
+                        {interest}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-field">
+                <label className="field-label">Group Name</label>
+                <input
+                  value={props.groupName}
+                  onChange={(e) => props.onGroupNameChange(e.target.value)}
+                  placeholder="e.g. CS Study Crew"
+                />
+              </div>
+
+              <button
+                className="btn-primary full-width"
+                onClick={props.onStartMatchmakingDemo}
+                disabled={props.isDemoRunning}
+              >
+                <Search size={16} />
+                {props.isDemoRunning ? "Searching..." : "Start Matchmaking"}
+              </button>
+            </div>
           </div>
-          <p className="demo-status">{props.demoStatus}</p>
-          {props.demoCandidates.length > 0 && (
-            <ul className="demo-list">
-              {props.demoCandidates.map((item) => (
-                <li key={item.userId}>
-                  <label className="match-candidate-row">
-                    <input
-                      type="checkbox"
-                      checked={props.selectedMatchUserIds.includes(item.userId)}
-                      onChange={() => props.onToggleMatchCandidateSelection(item)}
-                    />
-                    <span>
-                      {item.username} - score {item.score}
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
+        </aside>
+
+        {/* Right: Candidates */}
+        <section className="matching-results">
+          <div className="section-header">
+            <Users size={18} className="section-title-icon" />
+            <h3>Matched Candidates</h3>
+            {props.demoCandidates.length > 0 && (
+              <span className="count-badge">{props.demoCandidates.length} found</span>
+            )}
+          </div>
+
+          {props.demoStatus && (
+            <div className="matching-status-banner">{props.demoStatus}</div>
           )}
-        </div>
-      </section>
+
+          {props.demoCandidates.length === 0 ? (
+            <div className="empty-state-block">
+              <Users size={28} />
+              <p>No candidates yet. Start matchmaking to find study partners.</p>
+            </div>
+          ) : (
+            <>
+              <div className="matching-candidates-list">
+                {props.demoCandidates.map((item) => {
+                  const isSelected = props.selectedMatchUserIds.includes(item.userId);
+                  return (
+                    <label
+                      key={item.userId}
+                      className={`match-candidate-card ${isSelected ? "selected" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => props.onToggleMatchCandidateSelection(item)}
+                        className="candidate-checkbox"
+                      />
+                      <div className="candidate-avatar">
+                        {item.username.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="candidate-info">
+                        <strong>{item.username}</strong>
+                        <span className="candidate-score">Score: {item.score}</span>
+                      </div>
+                      {isSelected && (
+                        <span className="candidate-selected-pill">Selected</span>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="matching-group-actions">
+                <button
+                  className="btn-secondary"
+                  onClick={props.onSelectAllDemoCandidates}
+                >
+                  Select All
+                </button>
+                <button
+                  className="btn-primary"
+                  onClick={props.onCreateDemoGroup}
+                  disabled={props.selectedMatchUserIds.length === 0 || !props.groupName.trim()}
+                >
+                  <Plus size={16} />
+                  Create Group ({props.selectedMatchUserIds.length} selected)
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      </div>
     </main>
   );
 }
